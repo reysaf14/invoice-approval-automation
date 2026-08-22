@@ -1,0 +1,146 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # n8n Main (Webhook receiver, UI, scheduler)
+  # ==========================================
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n-main
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      # Core
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      - N8N_HOST=${N8N_HOST}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=${N8N_PROTOCOL}
+      - WEBHOOK_URL=${WEBHOOK_URL}
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+      - N8N_MODE=queue
+      - EXECUTIONS_MODE=queue
+      # Database
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB=${DB_POSTGRESDB}
+      - DB_POSTGRESHOST=postgres
+      - DB_POSTGRESPORT=5432
+      - DB_POSTGRESUSER=${DB_POSTGRESUSER}
+      - DB_POSTGRES_PASSWORD=${DB_POSTGRES_PASSWORD}
+      # Redis Queue
+      - QUEUE_BULL_REDIS_HOST=redis
+      - QUEUE_BULL_REDIS_PORT=6379
+      # Logging
+      - N8N_LOG_LEVEL=info
+      - N8N_LOG_OUTPUT=console
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./credentials:/home/node/.gcp:ro  # Google Service Account key
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - n8n-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ==========================================
+  # n8n Worker (Queue execution)
+  # ==========================================
+  n8n-worker:
+    image: n8nio/n8n:latest
+    container_name: n8n-worker
+    restart: unless-stopped
+    command: worker
+    environment:
+      - N8N_HOST=${N8N_HOST}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=${N8N_PROTOCOL}
+      - WEBHOOK_URL=${WEBHOOK_URL}
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+      - N8N_MODE=queue
+      - EXECUTIONS_MODE=queue
+      # Database
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB=${DB_POSTGRESDB}
+      - DB_POSTGRESHOST=postgres
+      - DB_POSTGRESPORT=5432
+      - DB_POSTGRESUSER=${DB_POSTGRESUSER}
+      - DB_POSTGRES_PASSWORD=${DB_POSTGRES_PASSWORD}
+      # Redis Queue
+      - QUEUE_BULL_REDIS_HOST=redis
+      - QUEUE_BULL_REDIS_PORT=6379
+      # Logging
+      - N8N_LOG_LEVEL=info
+      - N8N_LOG_OUTPUT=console
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./credentials:/home/node/.gcp:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - n8n-network
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # ==========================================
+  # PostgreSQL (n8n metadata + executions)
+  # ==========================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: n8n-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${DB_POSTGRESDB}
+      - POSTGRES_USER=${DB_POSTGRESUSER}
+      - POSTGRES_PASSWORD=${DB_POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - n8n-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_POSTGRESUSER} -d ${DB_POSTGRESDB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================
+  # Redis (Queue + Cache)
+  # ==========================================
+  redis:
+    image: redis:7-alpine
+    container_name: n8n-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - n8n-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  n8n_data:
+  postgres_data:
+  redis_data:
+
+networks:
+  n8n-network:
+    driver: bridge

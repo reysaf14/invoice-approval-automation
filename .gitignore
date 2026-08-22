@@ -1,0 +1,18 @@
+# Environment variables
+.env
+
+# Credentials (Google SA, etc.)
+credentials/
+
+# System files
+.DS_Store
+*.log
+n8n_data/
+postgres_data/
+redis_data/
+__pycache__/
+*.pyc
+
+# IDE files
+.vscode/
+.idea/

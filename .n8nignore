@@ -1,0 +1,13 @@
+# n8nignore — Exclude non-workflow files from n8n runtime
+docs/
+tests/
+.ai/
+*.md
+.git/
+.gitignore
+.gitattributes
+.env.template
+.env
+credentials/
+scripts/
+src/

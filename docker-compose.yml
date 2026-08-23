@@ -5,7 +5,7 @@ services:
   # n8n Main (Webhook receiver, UI, scheduler)
   # ==========================================
   n8n:
-    image: n8nio/n8n:latest
+    image: n8nio/n8n:1.60.0
     container_name: n8n-main
     restart: unless-stopped
     ports:
@@ -37,6 +37,7 @@ services:
     volumes:
       - n8n_data:/home/node/.n8n
       - ./credentials:/home/node/.gcp:ro  # Google Service Account key
+      - ./n8n-workflows:/home/node/workflows:ro  # Workflow JSON files
     depends_on:
       postgres:
         condition: service_healthy
@@ -55,7 +56,7 @@ services:
   # n8n Worker (Queue execution)
   # ==========================================
   n8n-worker:
-    image: n8nio/n8n:latest
+    image: n8nio/n8n:1.60.0
     container_name: n8n-worker
     restart: unless-stopped
     command: worker
@@ -83,6 +84,7 @@ services:
     volumes:
       - n8n_data:/home/node/.n8n
       - ./credentials:/home/node/.gcp:ro
+      - ./n8n-workflows:/home/node/workflows:ro  # Workflow JSON files
     depends_on:
       postgres:
         condition: service_healthy

@@ -1,8 +1,231 @@
 {
   "name": "03-reminder-escalation",
-  "nodes": [],
-  "connections": {},
-  "active": false,
-  "settings": {},
-  "id": "3"
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 15 }]
+        }
+      },
+      "id": "600",
+      "name": "Cron Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 400]
+    },
+    {
+      "parameters": {
+        "sheetId": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+        "range": "Invoices",
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "status",
+              "lookupValue": "Pending Approval"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "610",
+      "name": "Read Pending Invoices",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [480, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "4", "name": "Google Sheets OAuth2" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Calculate aging for each pending invoice and categorize into reminder tiers\nconst items = $input.all();\nconst results = [];\nconst now = Date.now();\n\nfor (const item of items) {\n  const rows = item.json.data || [];\n\n  for (const row of rows) {\n    // Parse received_at timestamp\n    const receivedAt = row.received_at || row.created_at || '';\n    let ageHours = 0;\n\n    if (receivedAt) {\n      const receivedTime = new Date(receivedAt).getTime();\n      if (!isNaN(receivedTime)) {\n        ageHours = (now - receivedTime) / (1000 * 60 * 60);\n      }\n    }\n\n    // Current reminder count (default 0)\n    const reminderCount = parseInt(row.reminder_count || '0', 10);\n\n    // Determine reminder tier\n    // Tier 0: no reminder yet, age 1-3 hours\n    // Tier 1: first reminder sent, age 4-11 hours\n    // Tier 2: second reminder sent, age 12-24 hours\n    // Tier 3: escalation, age > 24 hours\n    let tier = 'none';\n    let shouldRemind = false;\n    let messageText = '';\n    let recipient = 'owner';\n\n    if (ageHours > 24) {\n      // Escalation: notify admin\n      tier = 'escalation';\n      shouldRemind = reminderCount < 4; // max 1 escalation\n      recipient = 'admin';\n      messageText =\n        '⚠️ <b>ESCALATION: Invoice belum di-approve > 24 jam</b>\\n\\n' +\n        '🏢 Vendor: ' + (row.vendor || '-') + '\\n' +\n        '🔢 No. Invoice: ' + (row.invoice_number || '-') + '\\n' +\n        '💰 Nominal: Rp ' + (Number(row.amount) || 0).toLocaleString('id-ID') + '\\n' +\n        '📅 Diterima: ' + receivedAt.substring(0, 16) + '\\n' +\n        '⏰ Usia: ' + Math.round(ageHours) + ' jam\\n' +\n        '📊 Reminder dikirim: ' + reminderCount + 'x\\n\\n' +\n        '💡 Owner belum merespon. Mohon follow up langsung.';\n    } else if (ageHours > 12 && reminderCount < 3) {\n      // Tier 3: reminder ke-3\n      tier = 'tier3';\n      shouldRemind = true;\n      messageText =\n        '🔔 <b>Reminder #3: Invoice menunggu approval</b>\\n\\n' +\n        '🏢 Vendor: ' + (row.vendor || '-') + '\\n' +\n        '🔢 No. Invoice: ' + (row.invoice_number || '-') + '\\n' +\n        '💰 Nominal: Rp ' + (Number(row.amount) || 0).toLocaleString('id-ID') + '\\n' +\n        '⏰ Sudah ' + Math.round(ageHours) + ' jam menunggu.\\n\\n' +\n        'Mohon segera approve atau reject.';\n    } else if (ageHours > 4 && reminderCount < 2) {\n      // Tier 2: reminder ke-2\n      tier = 'tier2';\n      shouldRemind = true;\n      messageText =\n        '🔔 <b>Reminder #2: Invoice menunggu approval</b>\\n\\n' +\n        '🏢 Vendor: ' + (row.vendor || '-') + '\\n' +\n        '🔢 No. Invoice: ' + (row.invoice_number || '-') + '\\n' +\n        '💰 Nominal: Rp ' + (Number(row.amount) || 0).toLocaleString('id-ID') + '\\n' +\n        '⏰ Sudah ' + Math.round(ageHours) + ' jam menunggu.\\n\\n' +\n        'Jangan lupa approve ya.';\n    } else if (ageHours > 1 && reminderCount < 1) {\n      // Tier 1: reminder ke-1\n      tier = 'tier1';\n      shouldRemind = true;\n      messageText =\n        '🔔 <b>Reminder: Ada invoice baru menunggu approval</b>\\n\\n' +\n        '🏢 Vendor: ' + (row.vendor || '-') + '\\n' +\n        '🔢 No. Invoice: ' + (row.invoice_number || '-') + '\\n' +\n        '💰 Nominal: Rp ' + (Number(row.amount) || 0).toLocaleString('id-ID') + '\\n' +\n        '⏰ Sudah ' + Math.round(ageHours) + ' jam menunggu.\\n\\n' +\n        'Silakan approve atau reject.';\n    }\n\n    if (shouldRemind && messageText) {\n      results.push({\n        json: {\n          tier: tier,\n          recipient: recipient,\n          message: messageText,\n          invoice_id: row.invoice_id || '',\n          vendor: row.vendor || '',\n          invoice_number: row.invoice_number || '',\n          amount: row.amount || 0,\n          age_hours: Math.round(ageHours),\n          reminder_count: reminderCount + 1,\n          last_reminder_at: new Date().toISOString(),\n          chat_id: recipient === 'admin'\n            ? ($env.TELEGRAM_ADMIN_CHAT_ID || '')\n            : ($env.TELEGRAM_OWNER_CHAT_ID || '')\n        }\n      });\n    }\n  }\n}\n\nconsole.log('[REMINDER] Processed ' + items.length + ' batches, found ' + results.length + ' invoices to remind');\n\nreturn results.length > 0 ? results : [{ json: { tier: 'none', message: 'No invoices need reminders' } }];"
+      },
+      "id": "620",
+      "name": "Calculate Aging",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [710, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.tier}}",
+              "operation": "notEqual",
+              "value2": "none"
+            }
+          ]
+        }
+      },
+      "id": "630",
+      "name": "IF Has Reminders",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [940, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Route reminders by tier: tier1/tier2/tier3 → owner, escalation → admin\nconst items = $input.all();\nconst tier1 = [];\nconst tier2 = [];\nconst tier3 = [];\nconst escalation = [];\n\nfor (const item of items) {\n  const tier = item.json.tier;\n  if (tier === 'tier1') tier1.push(item);\n  else if (tier === 'tier2') tier2.push(item);\n  else if (tier === 'tier3') tier3.push(item);\n  else if (tier === 'escalation') escalation.push(item);\n}\n\n// Return all tiers in order (n8n will split by output index)\nconst allItems = [...tier1, ...tier2, ...tier3, ...escalation];\n\nconsole.log('[ROUTE] tier1=' + tier1.length + ' tier2=' + tier2.length + ' tier3=' + tier3.length + ' escalation=' + escalation.length);\n\n// Return with tier tag for downstream routing\nreturn allItems.length > 0 ? allItems : [{ json: { tier: 'none', message: 'No reminders to send' } }];"
+      },
+      "id": "640",
+      "name": "Route by Tier",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1170, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter: only tier1, tier2, tier3 items (owner reminders)\nreturn $input.all().filter(item =>\n  item.json.tier === 'tier1' ||\n  item.json.tier === 'tier2' ||\n  item.json.tier === 'tier3'\n);"
+      },
+      "id": "650",
+      "name": "Filter Owner Reminders",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 340]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter: only escalation items (admin notifications)\nreturn $input.all().filter(item => item.json.tier === 'escalation');"
+      },
+      "id": "660",
+      "name": "Filter Escalations",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 520]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$env.TELEGRAM_OWNER_CHAT_ID}}",
+        "text": "={{$json.message}}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "670",
+      "name": "Telegram Send Reminder",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1630, 340],
+      "credentials": {
+        "telegramApi": { "id": "5", "name": "Telegram Bot API" }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$env.TELEGRAM_ADMIN_CHAT_ID}}",
+        "text": "={{$json.message}}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "680",
+      "name": "Telegram Escalation Admin",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1630, 520],
+      "credentials": {
+        "telegramApi": { "id": "5", "name": "Telegram Bot API" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+        "sheetName": "Invoices",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "invoice_id": "={{$json.invoice_id}}",
+            "reminder_count": "={{$json.reminder_count}}",
+            "last_reminder_at": "={{$json.last_reminder_at}}",
+            "updated_at": "={{$json.last_reminder_at}}"
+          }
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "id": "690",
+      "name": "Update Reminder Count",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1860, 340],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "4", "name": "Google Sheets OAuth2" }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "700",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [250, 700]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$env.TELEGRAM_ADMIN_CHAT_ID}}",
+        "text": "=⚠️ <b>Workflow Error: Reminder Escalation</b>\n\nTime: {{ $now.toISOString() }}\nError: {{ $json.execution.error.message }}\nWorkflow: {{ $json.workflow.name }}\nExecution ID: {{ $json.execution.id }}\n\nCheck n8n dashboard for details.",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "710",
+      "name": "Telegram Error Admin",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [500, 700],
+      "credentials": {
+        "telegramApi": { "id": "5", "name": "Telegram Bot API" }
+      }
+    }
+  ],
+  "connections": {
+    "Cron Trigger": {
+      "main": [[{ "node": "Read Pending Invoices", "type": "main", "index": 0 }]]
+    },
+    "Read Pending Invoices": {
+      "main": [[{ "node": "Calculate Aging", "type": "main", "index": 0 }]]
+    },
+    "Calculate Aging": {
+      "main": [[{ "node": "IF Has Reminders", "type": "main", "index": 0 }]]
+    },
+    "IF Has Reminders": {
+      "main": [
+        [{ "node": "Route by Tier", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Route by Tier": {
+      "main": [
+        [
+          { "node": "Filter Owner Reminders", "type": "main", "index": 0 },
+          { "node": "Filter Escalations", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Filter Owner Reminders": {
+      "main": [[{ "node": "Telegram Send Reminder", "type": "main", "index": 0 }]]
+    },
+    "Filter Escalations": {
+      "main": [[{ "node": "Telegram Escalation Admin", "type": "main", "index": 0 }]]
+    },
+    "Telegram Send Reminder": {
+      "main": [[{ "node": "Update Reminder Count", "type": "main", "index": 0 }]]
+    },
+    "Telegram Escalation Admin": {
+      "main": [[{ "node": "Update Reminder Count", "type": "main", "index": 0 }]]
+    },
+    "Error Trigger": {
+      "main": [[{ "node": "Telegram Error Admin", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "pinData": {},
+  "versionId": "b2c3d4e5-f6a7-4890-bcde-f12345678901",
+  "triggerCount": 0
 }

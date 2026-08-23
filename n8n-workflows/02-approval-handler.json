@@ -1,8 +1,407 @@
 {
   "name": "02-approval-handler",
-  "nodes": [],
-  "connections": {},
-  "active": false,
-  "settings": {},
-  "id": "2"
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "approve",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "300",
+      "name": "Webhook: Approve",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// HMAC-SHA256 Verification (ADR-005)\n// Verifies webhook signature + timestamp freshness\nconst crypto = require('crypto');\n\nconst item = $input.first();\nconst body = item.json.body || {};\nconst headers = item.json.headers || {};\n\n// Read HMAC secret from environment\nconst secret = $env.WEBHOOK_HMAC_SECRET;\nconst tolerance = parseInt($env.WEBHOOK_TIMESTAMP_TOLERANCE || '300', 10);\n\nif (!secret) {\n  console.error('[HMAC] WEBHOOK_HMAC_SECRET not configured');\n  return [{ json: { valid: false, error: 'HMAC secret not configured' } }];\n}\n\n// Extract signature and timestamp from headers\nconst signature = headers['x-signature'] || headers['X-Signature'] || '';\nconst timestamp = parseInt(headers['x-timestamp'] || headers['X-Timestamp'] || '0', 10);\n\nif (!signature || !timestamp) {\n  console.error('[HMAC] Missing signature or timestamp header');\n  return [{ json: { valid: false, error: 'Missing signature or timestamp' } }];\n}\n\n// Replay protection: reject if timestamp is too old or too far in future\nconst now = Math.floor(Date.now() / 1000);\nif (Math.abs(now - timestamp) > tolerance) {\n  console.error('[HMAC] Timestamp expired: diff=' + Math.abs(now - timestamp) + 's tolerance=' + tolerance + 's');\n  return [{ json: { valid: false, error: 'Timestamp expired or too far in future' } }];\n}\n\n// Compute expected signature\nconst payloadStr = JSON.stringify(body);\nconst message = payloadStr + '.' + timestamp;\nconst expectedSig = 'sha256=' + crypto.createHmac('sha256', secret).update(message).digest('hex');\n\n// Constant-time comparison\ntry {\n  const sigBuf = Buffer.from(signature, 'utf8');\n  const expectedBuf = Buffer.from(expectedSig, 'utf8');\n\n  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {\n    console.error('[HMAC] Signature mismatch');\n    return [{ json: { valid: false, error: 'Invalid signature' } }];\n  }\n} catch (e) {\n  console.error('[HMAC] Comparison error: ' + e.message);\n  return [{ json: { valid: false, error: 'Signature verification failed' } }];\n}\n\nconsole.log('[HMAC] Signature valid for action=' + body.action + ' invoice_id=' + body.invoice_id);\n\nreturn [{\n  json: {\n    valid: true,\n    invoice_id: body.invoice_id || '',\n    action: body.action || '',\n    reason: body.reason || '',\n    owner_id: body.owner_id || $env.TELEGRAM_OWNER_CHAT_ID || ''\n  }\n}];"
+      },
+      "id": "310",
+      "name": "HMAC Verification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.valid}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "320",
+      "name": "IF Valid Signature",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [700, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"error\": \"Unauthorized: invalid signature\"}",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "id": "330",
+      "name": "Respond 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [920, 280]
+    },
+    {
+      "parameters": {
+        "sheetId": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+        "range": "Invoices",
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "invoice_id",
+              "lookupValue": "={{$json.invoice_id}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "340",
+      "name": "Find Invoice",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [920, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "4", "name": "Google Sheets OAuth2" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check if invoice exists and is in Pending Approval status\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const rows = item.json.data || [];\n\n  if (rows.length === 0) {\n    results.push({\n      json: {\n        found: false,\n        error: 'Invoice not found',\n        invoice_id: item.json.invoice_id || ''\n      }\n    });\n    continue;\n  }\n\n  const row = rows[0];\n  const status = (row.status || '').trim();\n\n  if (status !== 'Pending Approval') {\n    results.push({\n      json: {\n        found: true,\n        processable: false,\n        current_status: status,\n        error: 'Invoice already ' + status,\n        invoice_id: row.invoice_id || ''\n      }\n    });\n    continue;\n  }\n\n  results.push({\n    json: {\n      found: true,\n      processable: true,\n      invoice_id: row.invoice_id || '',\n      vendor: row.vendor || '',\n      invoice_date: row.invoice_date || '',\n      invoice_number: row.invoice_number || '',\n      amount: row.amount || 0,\n      status: status,\n      confidence: row.confidence || 0,\n      drive_file_link: row.drive_file_link || '',\n      source: row.source || ''\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "350",
+      "name": "Check Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.processable}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "360",
+      "name": "IF Processable",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1360, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"error\": \"{{ $json.error }}\"}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "370",
+      "name": "Respond Not Processable",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1580, 280]
+    },
+    {
+      "parameters": {
+        "formTitle": "Approval Invoice",
+        "formDescription": "=Review dan approve/reject invoice dari {{ $json.vendor }}",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Vendor",
+              "fieldName": "vendor",
+              "fieldType": "string",
+              "defaultValue": "={{ $json.vendor }}",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Tanggal Invoice",
+              "fieldName": "invoice_date",
+              "fieldType": "string",
+              "defaultValue": "={{ $json.invoice_date }}",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Nomor Invoice",
+              "fieldName": "invoice_number",
+              "fieldType": "string",
+              "defaultValue": "={{ $json.invoice_number }}",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Nominal (Rp)",
+              "fieldName": "amount",
+              "fieldType": "number",
+              "defaultValue": "={{ $json.amount }}",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Decision",
+              "fieldName": "decision",
+              "fieldType": "options",
+              "requiredField": true,
+              "options": [
+                { "option": "Approve" },
+                { "option": "Reject" }
+              ]
+            },
+            {
+              "fieldLabel": "Reject Reason (wajib jika Reject)",
+              "fieldName": "reject_reason",
+              "fieldType": "textarea",
+              "requiredField": false,
+              "placeholder": "Isi alasan jika menolak invoice ini..."
+            }
+          ]
+        },
+        "options": {
+          "respondWithOptions": {
+            "values": {
+              "respondWith": "json",
+              "responseBody": "={\"status\": \"success\", \"message\": \"Invoice {{ $json.invoice_number }} has been {{ $json.decision }}\"}"
+            }
+          }
+        }
+      },
+      "id": "380",
+      "name": "Approval Form",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 1,
+      "position": [1580, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process approval decision\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const form = item.json;  // Form submission data\n  const now = new Date().toISOString();\n\n  const decision = (form.decision || '').trim().toLowerCase();\n  const isApprove = decision === 'approve';\n\n  // Validate: reject requires reason\n  if (!isApprove && (!form.reject_reason || form.reject_reason.trim() === '')) {\n    results.push({\n      json: {\n        valid: false,\n        error: 'Reject reason is required'\n      }\n    });\n    continue;\n  }\n\n  // Build update payload for Google Sheets\n  const updatePayload = {\n    invoice_id: form.invoice_id || '',\n    vendor: form.vendor || '',\n    invoice_date: form.invoice_date || '',\n    invoice_number: form.invoice_number || '',\n    amount: form.amount || 0,\n    status: isApprove ? 'Approved' : 'Rejected',\n    updated_at: now\n  };\n\n  if (isApprove) {\n    updatePayload.approved_at = now;\n    updatePayload.approved_by = form.owner_id || 'owner';\n    updatePayload.rejected_at = '';\n    updatePayload.reject_reason = '';\n  } else {\n    updatePayload.approved_at = '';\n    updatePayload.approved_by = '';\n    updatePayload.rejected_at = now;\n    updatePayload.reject_reason = form.reject_reason;\n  }\n\n  // Format amount\n  const amountNum = Number(form.amount) || 0;\n  const amountFormatted = 'Rp ' + amountNum.toLocaleString('id-ID');\n\n  results.push({\n    json: {\n      ...updatePayload,\n      valid: true,\n      is_approve: isApprove,\n      amount_formatted: amountFormatted,\n      admin_chat_id: $env.TELEGRAM_ADMIN_CHAT_ID || '',\n      owner_chat_id: form.owner_id || $env.TELEGRAM_OWNER_CHAT_ID || ''\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "390",
+      "name": "Process Decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1800, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.valid}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "400",
+      "name": "IF Decision Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [2020, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"error\": \"{{ $json.error }}\"}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "410",
+      "name": "Respond Invalid Decision",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2240, 280]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+        "sheetName": "Invoices",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "invoice_id": "={{$json.invoice_id}}",
+            "vendor": "={{$json.vendor}}",
+            "invoice_date": "={{$json.invoice_date}}",
+            "invoice_number": "={{$json.invoice_number}}",
+            "amount": "={{$json.amount}}",
+            "status": "={{$json.status}}",
+            "approved_at": "={{$json.approved_at}}",
+            "approved_by": "={{$json.approved_by}}",
+            "rejected_at": "={{$json.rejected_at}}",
+            "reject_reason": "={{$json.reject_reason}}",
+            "updated_at": "={{$json.updated_at}}"
+          }
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "id": "420",
+      "name": "Update Sheets Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [2240, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "4", "name": "Google Sheets OAuth2" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Admin notification message\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const inv = item.json;\n  const action = inv.is_approve ? 'APPROVED' : 'REJECTED';\n  const emoji = inv.is_approve ? '✅' : '❌';\n\n  let message = emoji + ' <b>Invoice ' + action + '</b>\\n\\n';\n  message += '🏢 Vendor: ' + (inv.vendor || '-') + '\\n';\n  message += '🔢 No. Invoice: ' + (inv.invoice_number || '-') + '\\n';\n  message += '💰 Nominal: ' + (inv.amount_formatted || '-') + '\\n';\n  message += '📅 Tanggal: ' + (inv.invoice_date || '-') + '\\n';\n  message += '👤 Approved/Rejected by: ' + (inv.approved_by || inv.reject_reason || 'Owner') + '\\n';\n\n  if (!inv.is_approve) {\n    message += '\\n📝 Alasan Reject: ' + (inv.reject_reason || '-') + '\\n';\n  }\n\n  if (inv.is_approve) {\n    message += '\\n💡 <b>Siap untuk eksekusi pembayaran.</b>';\n  }\n\n  results.push({\n    json: {\n      chatId: inv.admin_chat_id || $env.TELEGRAM_ADMIN_CHAT_ID || '',\n      text: message,\n      parseMode: 'HTML'\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "430",
+      "name": "Build Admin Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2460, 350]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Owner confirmation message\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const inv = item.json;\n  const action = inv.is_approve ? 'disetujui' : 'ditolak';\n  const emoji = inv.is_approve ? '✅' : '❌';\n\n  const message =\n    emoji + ' <b>Invoice ' + action + '</b>\\n\\n' +\n    '🔢 No. Invoice: ' + (inv.invoice_number || '-') + '\\n' +\n    '🏢 Vendor: ' + (inv.vendor || '-') + '\\n' +\n    '💰 Nominal: ' + (inv.amount_formatted || '-') + '\\n\\n' +\n    'Terima kasih. Invoice sudah diproses.';\n\n  results.push({\n    json: {\n      chatId: inv.owner_chat_id || $env.TELEGRAM_OWNER_CHAT_ID || '',\n      text: message,\n      parseMode: 'HTML'\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "440",
+      "name": "Build Owner Confirmation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2460, 500]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "={{$json.text}}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "450",
+      "name": "Telegram Notify Admin",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [2680, 350],
+      "credentials": {
+        "telegramApi": { "id": "5", "name": "Telegram Bot API" }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "={{$json.text}}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "460",
+      "name": "Telegram Confirm Owner",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [2680, 500],
+      "credentials": {
+        "telegramApi": { "id": "5", "name": "Telegram Bot API" }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "500",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [250, 700]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$env.TELEGRAM_ADMIN_CHAT_ID}}",
+        "text": "=⚠️ <b>Workflow Error: Approval Handler</b>\n\nTime: {{ $now.toISOString() }}\nError: {{ $json.execution.error.message }}\nWorkflow: {{ $json.workflow.name }}\nExecution ID: {{ $json.execution.id }}\n\nCheck n8n dashboard for details.",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "510",
+      "name": "Telegram Error Admin",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [500, 700],
+      "credentials": {
+        "telegramApi": { "id": "5", "name": "Telegram Bot API" }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook: Approve": {
+      "main": [[{ "node": "HMAC Verification", "type": "main", "index": 0 }]]
+    },
+    "HMAC Verification": {
+      "main": [[{ "node": "IF Valid Signature", "type": "main", "index": 0 }]]
+    },
+    "IF Valid Signature": {
+      "main": [
+        [{ "node": "Find Invoice", "type": "main", "index": 0 }],
+        [{ "node": "Respond 401", "type": "main", "index": 0 }]
+      ]
+    },
+    "Find Invoice": {
+      "main": [[{ "node": "Check Status", "type": "main", "index": 0 }]]
+    },
+    "Check Status": {
+      "main": [[{ "node": "IF Processable", "type": "main", "index": 0 }]]
+    },
+    "IF Processable": {
+      "main": [
+        [{ "node": "Approval Form", "type": "main", "index": 0 }],
+        [{ "node": "Respond Not Processable", "type": "main", "index": 0 }]
+      ]
+    },
+    "Approval Form": {
+      "main": [[{ "node": "Process Decision", "type": "main", "index": 0 }]]
+    },
+    "Process Decision": {
+      "main": [[{ "node": "IF Decision Valid", "type": "main", "index": 0 }]]
+    },
+    "IF Decision Valid": {
+      "main": [
+        [{ "node": "Update Sheets Status", "type": "main", "index": 0 }],
+        [{ "node": "Respond Invalid Decision", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update Sheets Status": {
+      "main": [
+        [
+          { "node": "Build Admin Notification", "type": "main", "index": 0 },
+          { "node": "Build Owner Confirmation", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Build Admin Notification": {
+      "main": [[{ "node": "Telegram Notify Admin", "type": "main", "index": 0 }]]
+    },
+    "Build Owner Confirmation": {
+      "main": [[{ "node": "Telegram Confirm Owner", "type": "main", "index": 0 }]]
+    },
+    "Error Trigger": {
+      "main": [[{ "node": "Telegram Error Admin", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "pinData": {},
+  "versionId": "a1b2c3d4-e5f6-4789-abcd-ef1234567890",
+  "triggerCount": 0
 }

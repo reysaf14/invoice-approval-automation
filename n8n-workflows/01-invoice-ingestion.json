@@ -1,8 +1,387 @@
 {
   "name": "01-invoice-ingestion",
-  "nodes": [],
-  "connections": {},
-  "active": false,
-  "settings": {},
-  "id": "1"
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [{ "mode": "everyMinute", "minutesInterval": 2 }]
+        },
+        "filters": {
+          "subject": "",
+          "downloadAttachments": true,
+          "attachmentExtensions": ["pdf", "jpg", "jpeg", "png"]
+        },
+        "options": {}
+      },
+      "id": "100",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "credentials": {
+        "gmailOAuth2": { "id": "1", "name": "Gmail OAuth2" }
+      }
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [{ "mode": "everyMinute", "minutesInterval": 5 }]
+        },
+        "folderId": "={{$env.GOOGLE_DRIVE_FOLDER_ID}}",
+        "options": {
+          "fileExtensions": ["pdf", "jpg", "jpeg", "png"]
+        }
+      },
+      "id": "110",
+      "name": "Google Drive Trigger",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [250, 550],
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "2", "name": "Google Drive OAuth2" }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "id": "120",
+      "name": "Merge Sources",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [550, 420]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": "={{ $json.id || $json.attachments?.[0]?.id }}",
+        "options": {}
+      },
+      "id": "130",
+      "name": "Download File",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 2,
+      "position": [750, 420],
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "2", "name": "Google Drive OAuth2" }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://documentai.googleapis.com/v1/projects/{{$env.GOOGLE_DOC_AI_PROJECT_ID}}/locations/{{$env.GOOGLE_DOC_AI_LOCATION}}/processors/{{$env.GOOGLE_DOC_AI_PROCESSOR_ID}}:process",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ document: { content: $binary.data ? $binary.data.data : '', mimeType: $binary.data ? $binary.data.mimeType : 'application/pdf' } }) }}",
+        "options": {}
+      },
+      "id": "140",
+      "name": "Google Document AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [950, 420],
+      "credentials": {
+        "googleApi": { "id": "3", "name": "Google Document AI API" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Google Document AI response\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const response = item.json;\n  const document = response.document || {};\n  const entities = document.entities || [];\n\n  // Map entity types to invoice fields\n  const entityMap = {\n    vendor: ['vendor', 'supplier', 'seller', 'from', 'receiver'],\n    invoice_date: ['date', 'invoice_date', 'invoice date', 'issue_date'],\n    invoice_number: ['invoice_number', 'invoice_id', 'number', 'no', 'invoice_no'],\n    amount: ['amount', 'total', 'total_amount', 'grand_total', 'nominal', 'balance_due']\n  };\n\n  const extracted = {\n    vendor: null,\n    invoice_date: null,\n    invoice_number: null,\n    amount: null,\n    confidence_scores: {\n      vendor: 0.0,\n      invoice_date: 0.0,\n      invoice_number: 0.0,\n      amount: 0.0,\n      overall: 0.0\n    }\n  };\n\n  const confidences = [];\n\n  for (const entity of entities) {\n    const entityType = (entity.type || '').toLowerCase();\n    const mentionText = (entity.mentionText || '').trim();\n    const confidence = entity.confidence || 0.0;\n\n    for (const [field, keywords] of Object.entries(entityMap)) {\n      if (keywords.some(kw => entityType.includes(kw))) {\n        extracted[field] = mentionText;\n        extracted.confidence_scores[field] = confidence;\n        confidences.push(confidence);\n        break;\n      }\n    }\n  }\n\n  // Calculate overall confidence\n  extracted.confidence_scores.overall =\n    confidences.length > 0\n      ? confidences.reduce((a, b) => a + b, 0) / confidences.length\n      : 0.0;\n\n  // Source detection: Gmail has 'attachments', Drive has 'id' and 'mimeType'\n  const source = (item.json.attachments || item.json.mimeType) ? 'Gmail' : 'Drive';\n  const driveFileId = item.json.id || (item.json.attachments && item.json.attachments[0] ? item.json.attachments[0].id : '');\n  const driveFileLink = driveFileId\n    ? 'https://drive.google.com/file/d/' + driveFileId + '/view'\n    : '';\n\n  results.push({\n    json: {\n      vendor: extracted.vendor,\n      invoice_date: extracted.invoice_date,\n      invoice_number: extracted.invoice_number,\n      amount: extracted.amount,\n      confidence_scores: extracted.confidence_scores,\n      overall_confidence: extracted.confidence_scores.overall,\n      source: source,\n      drive_file_id: driveFileId,\n      drive_file_link: driveFileLink\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "150",
+      "name": "Parse OCR Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1150, 420]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{$json.overall_confidence}}",
+              "operation": "largerEqual",
+              "value2": 0.85
+            }
+          ]
+        }
+      },
+      "id": "160",
+      "name": "IF Confidence OK",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1350, 420]
+    },
+    {
+      "parameters": {
+        "sheetId": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+        "range": "Invoices",
+        "options": {}
+      },
+      "id": "170",
+      "name": "Read Existing Invoices",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1550, 320],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "4", "name": "Google Sheets OAuth2" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check for duplicate invoice using composite key\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const invoice = item.json;\n\n  // Build composite key (case-insensitive, trimmed)\n  const vendor = (invoice.vendor || '').trim().toLowerCase();\n  const invoiceNumber = (invoice.invoice_number || '').trim().toLowerCase();\n  const invoiceDate = (invoice.invoice_date || '').trim();\n  const amount = String(invoice.amount || '').trim();\n\n  const newKey = vendor + '|' + invoiceNumber + '|' + invoiceDate + '|' + amount;\n\n  // Read existing invoices from previous node\n  const existingRows = $input.first().json.data || [];\n  let isDuplicate = false;\n  let matchedRowIndex = -1;\n\n  for (let i = 0; i < existingRows.length; i++) {\n    const row = existingRows[i];\n    const existVendor = (row.vendor || '').trim().toLowerCase();\n    const existNumber = (row.invoice_number || '').trim().toLowerCase();\n    const existDate = (row.invoice_date || '').trim();\n    const existAmount = String(row.amount || '').trim();\n\n    const existKey = existVendor + '|' + existNumber + '|' + existDate + '|' + existAmount;\n\n    if (existKey === newKey && existKey !== '|||') {\n      isDuplicate = true;\n      matchedRowIndex = i;\n      break;\n    }\n  }\n\n  results.push({\n    json: {\n      ...invoice,\n      is_duplicate: isDuplicate,\n      matched_row_index: matchedRowIndex,\n      status: isDuplicate ? 'Duplicate' : 'Pending Approval'\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "180",
+      "name": "Check Dedupe",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1550, 520]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.is_duplicate}}",
+              "value2": false
+            }
+          ]
+        }
+      },
+      "id": "190",
+      "name": "IF Not Duplicate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1750, 520]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build invoice row for Google Sheets\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const inv = item.json;\n  const now = new Date().toISOString();\n\n  // Generate UUID v4\n  const uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {\n    const r = Math.random() * 16 | 0;\n    const v = c === 'x' ? r : (r & 0x3 | 0x8);\n    return v.toString(16);\n  });\n\n  results.push({\n    json: {\n      invoice_id: uuid,\n      received_at: now,\n      vendor: inv.vendor || '',\n      invoice_date: inv.invoice_date || '',\n      invoice_number: inv.invoice_number || '',\n      amount: inv.amount || 0,\n      status: inv.status || 'Pending Approval',\n      confidence: inv.overall_confidence || 0,\n      drive_file_id: inv.drive_file_id || '',\n      drive_file_link: inv.drive_file_link || '',\n      source: inv.source || 'Drive',\n      approved_at: '',\n      approved_by: '',\n      rejected_at: '',\n      reject_reason: '',\n      reminder_count: 0,\n      last_reminder_at: '',\n      created_at: now,\n      updated_at: now\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "200",
+      "name": "Build Invoice Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1950, 420]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build duplicate row for Google Sheets\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const inv = item.json;\n  const now = new Date().toISOString();\n\n  results.push({\n    json: {\n      invoice_id: 'DUPLICATE-' + Date.now(),\n      received_at: now,\n      vendor: inv.vendor || '',\n      invoice_date: inv.invoice_date || '',\n      invoice_number: inv.invoice_number || '',\n      amount: inv.amount || 0,\n      status: 'Duplicate',\n      confidence: inv.overall_confidence || 0,\n      drive_file_id: inv.drive_file_id || '',\n      drive_file_link: inv.drive_file_link || '',\n      source: inv.source || 'Drive',\n      approved_at: '',\n      approved_by: '',\n      rejected_at: '',\n      reject_reason: 'Duplicate of existing invoice (row ' + (inv.matched_row_index + 1) + ')',\n      reminder_count: 0,\n      last_reminder_at: '',\n      created_at: now,\n      updated_at: now\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "210",
+      "name": "Build Duplicate Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1950, 620]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+        "sheetName": "Invoices",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "invoice_id": "={{$json.invoice_id}}",
+            "received_at": "={{$json.received_at}}",
+            "vendor": "={{$json.vendor}}",
+            "invoice_date": "={{$json.invoice_date}}",
+            "invoice_number": "={{$json.invoice_number}}",
+            "amount": "={{$json.amount}}",
+            "status": "={{$json.status}}",
+            "confidence": "={{$json.confidence}}",
+            "drive_file_id": "={{$json.drive_file_id}}",
+            "drive_file_link": "={{$json.drive_file_link}}",
+            "source": "={{$json.source}}",
+            "approved_at": "={{$json.approved_at}}",
+            "approved_by": "={{$json.approved_by}}",
+            "rejected_at": "={{$json.rejected_at}}",
+            "reject_reason": "={{$json.reject_reason}}",
+            "reminder_count": "={{$json.reminder_count}}",
+            "last_reminder_at": "={{$json.last_reminder_at}}",
+            "created_at": "={{$json.created_at}}",
+            "updated_at": "={{$json.updated_at}}"
+          }
+        },
+        "options": {}
+      },
+      "id": "220",
+      "name": "Append to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [2150, 420],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "4", "name": "Google Sheets OAuth2" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Send Telegram notification to Owner (only for new invoices, not duplicates)\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const inv = item.json;\n\n  // Format amount as Indonesian Rupiah\n  const amountNum = Number(inv.amount) || 0;\n  const amountFormatted = 'Rp ' + amountNum.toLocaleString('id-ID');\n\n  // Confidence as percentage\n  const confidencePct = Math.round((inv.confidence || 0) * 100);\n\n  // Build message\n  const message =\n    '📄 <b>Invoice Baru Masuk</b>\\n\\n' +\n    '🏢 Vendor: ' + (inv.vendor || '-') + '\\n' +\n    '📅 Tanggal: ' + (inv.invoice_date || '-') + '\\n' +\n    '🔢 No. Invoice: ' + (inv.invoice_number || '-') + '\\n' +\n    '💰 Nominal: ' + amountFormatted + '\\n' +\n    '🎯 Confidence: ' + confidencePct + '%\\n\\n' +\n    '📎 <a href=\"' + (inv.drive_file_link || '#') + '\">Lihat File</a>\\n\\n' +\n    'Status: <b>' + (inv.status || 'Pending Approval') + '</b>';\n\n  results.push({\n    json: {\n      chatId: '={{$env.TELEGRAM_OWNER_CHAT_ID}}',\n      text: message,\n      parseMode: 'HTML',\n      invoice_id: inv.invoice_id,\n      vendor: inv.vendor,\n      amount: amountFormatted\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "230",
+      "name": "Build Telegram Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2350, 420]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "={{$json.text}}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "240",
+      "name": "Telegram Notify Owner",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [2550, 420],
+      "credentials": {
+        "telegramApi": { "id": "5", "name": "Telegram Bot API" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Low Confidence — log for manual review\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const inv = item.json;\n  const now = new Date().toISOString();\n\n  console.log('[LOW CONFIDENCE] invoice_id=unknown confidence=' + inv.overall_confidence + ' vendor=' + inv.vendor);\n\n  results.push({\n    json: {\n      invoice_id: 'LOWCONF-' + Date.now(),\n      received_at: now,\n      vendor: inv.vendor || 'UNKNOWN',\n      invoice_date: inv.invoice_date || '',\n      invoice_number: inv.invoice_number || '',\n      amount: inv.amount || 0,\n      status: 'Low Confidence',\n      confidence: inv.overall_confidence || 0,\n      drive_file_id: inv.drive_file_id || '',\n      drive_file_link: inv.drive_file_link || '',\n      source: inv.source || 'Drive',\n      approved_at: '',\n      approved_by: '',\n      rejected_at: '',\n      reject_reason: 'OCR confidence below 85% threshold -- manual review required',\n      reminder_count: 0,\n      last_reminder_at: '',\n      created_at: now,\n      updated_at: now\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "250",
+      "name": "Build Low Confidence Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1550, 620]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": "={{$env.GOOGLE_SHEETS_SPREADSHEET_ID}}",
+        "sheetName": "Invoices",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "invoice_id": "={{$json.invoice_id}}",
+            "received_at": "={{$json.received_at}}",
+            "vendor": "={{$json.vendor}}",
+            "invoice_date": "={{$json.invoice_date}}",
+            "invoice_number": "={{$json.invoice_number}}",
+            "amount": "={{$json.amount}}",
+            "status": "={{$json.status}}",
+            "confidence": "={{$json.confidence}}",
+            "drive_file_id": "={{$json.drive_file_id}}",
+            "drive_file_link": "={{$json.drive_file_link}}",
+            "source": "={{$json.source}}",
+            "approved_at": "={{$json.approved_at}}",
+            "approved_by": "={{$json.approved_by}}",
+            "rejected_at": "={{$json.rejected_at}}",
+            "reject_reason": "={{$json.reject_reason}}",
+            "reminder_count": "={{$json.reminder_count}}",
+            "last_reminder_at": "={{$json.last_reminder_at}}",
+            "created_at": "={{$json.created_at}}",
+            "updated_at": "={{$json.updated_at}}"
+          }
+        },
+        "options": {}
+      },
+      "id": "260",
+      "name": "Append Low Confidence to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1750, 720],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "4", "name": "Google Sheets OAuth2" }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "300",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [250, 800]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$env.TELEGRAM_ADMIN_CHAT_ID}}",
+        "text": "=⚠️ <b>Workflow Error: Invoice Ingestion</b>\n\nTime: {{ $now.toISOString() }}\nError: {{ $json.execution.error.message }}\nWorkflow: {{ $json.workflow.name }}\nExecution ID: {{ $json.execution.id }}\n\nCheck n8n dashboard for details.",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "310",
+      "name": "Telegram Error Admin",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [500, 800],
+      "credentials": {
+        "telegramApi": { "id": "5", "name": "Telegram Bot API" }
+      }
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [[{ "node": "Merge Sources", "type": "main", "index": 0 }]]
+    },
+    "Google Drive Trigger": {
+      "main": [[{ "node": "Merge Sources", "type": "main", "index": 1 }]]
+    },
+    "Merge Sources": {
+      "main": [[{ "node": "Download File", "type": "main", "index": 0 }]]
+    },
+    "Download File": {
+      "main": [[{ "node": "Google Document AI", "type": "main", "index": 0 }]]
+    },
+    "Google Document AI": {
+      "main": [[{ "node": "Parse OCR Response", "type": "main", "index": 0 }]]
+    },
+    "Parse OCR Response": {
+      "main": [[{ "node": "IF Confidence OK", "type": "main", "index": 0 }]]
+    },
+    "IF Confidence OK": {
+      "main": [
+        [{ "node": "Read Existing Invoices", "type": "main", "index": 0 }],
+        [{ "node": "Build Low Confidence Row", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Existing Invoices": {
+      "main": [[{ "node": "Check Dedupe", "type": "main", "index": 0 }]]
+    },
+    "Check Dedupe": {
+      "main": [[{ "node": "IF Not Duplicate", "type": "main", "index": 0 }]]
+    },
+    "IF Not Duplicate": {
+      "main": [
+        [{ "node": "Build Invoice Row", "type": "main", "index": 0 }],
+        [{ "node": "Build Duplicate Row", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Invoice Row": {
+      "main": [[{ "node": "Append to Sheets", "type": "main", "index": 0 }]]
+    },
+    "Build Duplicate Row": {
+      "main": [[{ "node": "Append to Sheets", "type": "main", "index": 0 }]]
+    },
+    "Append to Sheets": {
+      "main": [[{ "node": "Build Telegram Message", "type": "main", "index": 0 }]]
+    },
+    "Build Telegram Message": {
+      "main": [[{ "node": "Telegram Notify Owner", "type": "main", "index": 0 }]]
+    },
+    "Build Low Confidence Row": {
+      "main": [[{ "node": "Append Low Confidence to Sheets", "type": "main", "index": 0 }]]
+    },
+    "Error Trigger": {
+      "main": [[{ "node": "Telegram Error Admin", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "pinData": {},
+  "versionId": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "triggerCount": 0
 }

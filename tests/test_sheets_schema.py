@@ -67,9 +67,13 @@ def validate_invoice_row(row: Dict[str, Any]) -> List[str]:
     # Validate amount is numeric
     if "amount" in row and row["amount"] is not None:
         try:
-            float(row["amount"])
+            amt = float(row["amount"])
         except (ValueError, TypeError):
             errors.append(f"Amount must be numeric: {row['amount']}")
+        else:
+            # BUG #3 fix: reject negative amounts
+            if amt < 0:
+                errors.append(f"Amount must be positive: {row['amount']}")
     
     # Validate confidence is 0-1
     if "confidence" in row and row["confidence"] is not None:
@@ -193,6 +197,11 @@ class TestSheetsSchema:
         errors = validate_invoice_row(row)
         assert any("reminder_count must be >=" in e for e in errors)
     
+    def test_negative_amount_fails(self):
+        row = create_valid_invoice_row(amount=-5000000)
+        errors = validate_invoice_row(row)
+        assert any("Amount must be positive" in e for e in errors)
+
     def test_optional_fields_can_be_none(self):
         row = create_valid_invoice_row(
             approved_at=None,

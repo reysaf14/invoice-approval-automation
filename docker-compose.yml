@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # ==========================================
   # n8n Main (Webhook receiver, UI, scheduler)

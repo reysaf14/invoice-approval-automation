@@ -20,20 +20,20 @@ services:
       - N8N_MODE=queue
       - EXECUTIONS_MODE=queue
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
-      # Database
+      # Database (n8n v1.60 naming convention)
       - DB_TYPE=postgresdb
-      - DB_POSTGRESDB=${DB_POSTGRESDB}
-      - DB_POSTGRESHOST=postgres
-      - DB_POSTGRESPORT=5432
-      - DB_POSTGRESUSER=${DB_POSTGRESUSER}
-      - DB_POSTGRES_PASSWORD=${DB_POSTGRES_PASSWORD}
+      - DB_POSTGRESDB_DATABASE=${DB_POSTGRESDB}
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_USER=${DB_POSTGRESUSER}
+      - DB_POSTGRESDB_PASSWORD=${DB_POSTGRES_PASSWORD}
       # Redis Queue
       - QUEUE_BULL_REDIS_HOST=redis
       - QUEUE_BULL_REDIS_PORT=6379
       # Logging
       - N8N_LOG_LEVEL=info
       - N8N_LOG_OUTPUT=console
-      # Force IPv4 for PostgreSQL connection (fix ECONNREFUSED ::1:5432)
+      # Force IPv4 for PostgreSQL connection
       - NODE_OPTIONS=--dns-result-order=ipv4first
     volumes:
       - n8n_data:/home/node/.n8n
@@ -70,20 +70,20 @@ services:
       - N8N_MODE=queue
       - EXECUTIONS_MODE=queue
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
-      # Database
+      # Database (n8n v1.60 naming convention)
       - DB_TYPE=postgresdb
-      - DB_POSTGRESDB=${DB_POSTGRESDB}
-      - DB_POSTGRESHOST=postgres
-      - DB_POSTGRESPORT=5432
-      - DB_POSTGRESUSER=${DB_POSTGRESUSER}
-      - DB_POSTGRES_PASSWORD=${DB_POSTGRES_PASSWORD}
+      - DB_POSTGRESDB_DATABASE=${DB_POSTGRESDB}
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_USER=${DB_POSTGRESUSER}
+      - DB_POSTGRESDB_PASSWORD=${DB_POSTGRES_PASSWORD}
       # Redis Queue
       - QUEUE_BULL_REDIS_HOST=redis
       - QUEUE_BULL_REDIS_PORT=6379
       # Logging
       - N8N_LOG_LEVEL=info
       - N8N_LOG_OUTPUT=console
-      # Force IPv4 for PostgreSQL connection (fix ECONNREFUSED ::1:5432)
+      # Force IPv4 for PostgreSQL connection
       - NODE_OPTIONS=--dns-result-order=ipv4first
     volumes:
       - n8n_data:/home/node/.n8n

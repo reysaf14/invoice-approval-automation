@@ -19,6 +19,7 @@ services:
       - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
       - N8N_MODE=queue
       - EXECUTIONS_MODE=queue
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
       # Database
       - DB_TYPE=postgresdb
       - DB_POSTGRESDB=${DB_POSTGRESDB}
@@ -32,6 +33,8 @@ services:
       # Logging
       - N8N_LOG_LEVEL=info
       - N8N_LOG_OUTPUT=console
+      # Force IPv4 for PostgreSQL connection (fix ECONNREFUSED ::1:5432)
+      - NODE_OPTIONS=--dns-result-order=ipv4first
     volumes:
       - n8n_data:/home/node/.n8n
       - ./credentials:/home/node/.gcp:ro  # Google Service Account key
@@ -66,6 +69,7 @@ services:
       - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
       - N8N_MODE=queue
       - EXECUTIONS_MODE=queue
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
       # Database
       - DB_TYPE=postgresdb
       - DB_POSTGRESDB=${DB_POSTGRESDB}
@@ -79,6 +83,8 @@ services:
       # Logging
       - N8N_LOG_LEVEL=info
       - N8N_LOG_OUTPUT=console
+      # Force IPv4 for PostgreSQL connection (fix ECONNREFUSED ::1:5432)
+      - NODE_OPTIONS=--dns-result-order=ipv4first
     volumes:
       - n8n_data:/home/node/.n8n
       - ./credentials:/home/node/.gcp:ro

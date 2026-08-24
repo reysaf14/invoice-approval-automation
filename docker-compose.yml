@@ -22,11 +22,11 @@ services:
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
       # Database (n8n v1.60 naming convention)
       - DB_TYPE=postgresdb
-      - DB_POSTGRESDB_DATABASE=${DB_POSTGRESDB}
+      - DB_POSTGRESDB_DATABASE=${DB_POSTGRESDB_DATABASE}
       - DB_POSTGRESDB_HOST=postgres
       - DB_POSTGRESDB_PORT=5432
-      - DB_POSTGRESDB_USER=${DB_POSTGRESUSER}
-      - DB_POSTGRESDB_PASSWORD=${DB_POSTGRES_PASSWORD}
+      - DB_POSTGRESDB_USER=${DB_POSTGRESDB_USER}
+      - DB_POSTGRESDB_PASSWORD=${DB_POSTGRESDB_PASSWORD}
       # Redis Queue
       - QUEUE_BULL_REDIS_HOST=redis
       - QUEUE_BULL_REDIS_PORT=6379
@@ -72,11 +72,11 @@ services:
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
       # Database (n8n v1.60 naming convention)
       - DB_TYPE=postgresdb
-      - DB_POSTGRESDB_DATABASE=${DB_POSTGRESDB}
+      - DB_POSTGRESDB_DATABASE=${DB_POSTGRESDB_DATABASE}
       - DB_POSTGRESDB_HOST=postgres
       - DB_POSTGRESDB_PORT=5432
-      - DB_POSTGRESDB_USER=${DB_POSTGRESUSER}
-      - DB_POSTGRESDB_PASSWORD=${DB_POSTGRES_PASSWORD}
+      - DB_POSTGRESDB_USER=${DB_POSTGRESDB_USER}
+      - DB_POSTGRESDB_PASSWORD=${DB_POSTGRESDB_PASSWORD}
       # Redis Queue
       - QUEUE_BULL_REDIS_HOST=redis
       - QUEUE_BULL_REDIS_PORT=6379
@@ -111,15 +111,15 @@ services:
     container_name: n8n-postgres
     restart: unless-stopped
     environment:
-      - POSTGRES_DB=${DB_POSTGRESDB}
-      - POSTGRES_USER=${DB_POSTGRESUSER}
-      - POSTGRES_PASSWORD=${DB_POSTGRES_PASSWORD}
+      - POSTGRES_DB=${DB_POSTGRESDB_DATABASE}
+      - POSTGRES_USER=${DB_POSTGRESDB_USER}
+      - POSTGRES_PASSWORD=${DB_POSTGRESDB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - n8n-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_POSTGRESUSER} -d ${DB_POSTGRESDB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_POSTGRESDB_USER} -d ${DB_POSTGRESDB_DATABASE}"]
       interval: 10s
       timeout: 5s
       retries: 5

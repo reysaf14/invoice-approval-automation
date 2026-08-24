@@ -214,7 +214,7 @@
       },
       "id": "380",
       "name": "Approval Form",
-      "type": "n8n-nodes-base.form",
+      "type": "n8n-nodes-base.formTrigger",
       "typeVersion": 1,
       "position": [
         1580,
@@ -595,5 +595,6 @@
   "staticData": null,
   "pinData": {},
   "versionId": "a1b2c3d4-e5f6-4789-abcd-ef1234567890",
-  "triggerCount": 0
+  "triggerCount": 0,
+  "active": false
 }

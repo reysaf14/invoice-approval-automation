@@ -4,12 +4,22 @@
     {
       "parameters": {
         "pollTimes": {
-          "item": [{ "mode": "everyMinute", "minutesInterval": 2 }]
+          "item": [
+            {
+              "mode": "everyMinute",
+              "minutesInterval": 2
+            }
+          ]
         },
         "filters": {
           "subject": "",
           "downloadAttachments": true,
-          "attachmentExtensions": ["pdf", "jpg", "jpeg", "png"]
+          "attachmentExtensions": [
+            "pdf",
+            "jpg",
+            "jpeg",
+            "png"
+          ]
         },
         "options": {}
       },
@@ -17,28 +27,50 @@
       "name": "Gmail Trigger",
       "type": "n8n-nodes-base.gmailTrigger",
       "typeVersion": 1,
-      "position": [250, 300],
+      "position": [
+        250,
+        300
+      ],
       "credentials": {
-        "gmailOAuth2": { "id": "1", "name": "Gmail OAuth2" }
+        "gmailOAuth2": {
+          "id": "1",
+          "name": "Gmail OAuth2"
+        }
       }
     },
     {
       "parameters": {
         "pollTimes": {
-          "item": [{ "mode": "everyMinute", "minutesInterval": 5 }]
+          "item": [
+            {
+              "mode": "everyMinute",
+              "minutesInterval": 5
+            }
+          ]
         },
         "folderId": "={{$env.GOOGLE_DRIVE_FOLDER_ID}}",
         "options": {
-          "fileExtensions": ["pdf", "jpg", "jpeg", "png"]
+          "fileExtensions": [
+            "pdf",
+            "jpg",
+            "jpeg",
+            "png"
+          ]
         }
       },
       "id": "110",
       "name": "Google Drive Trigger",
       "type": "n8n-nodes-base.googleDriveTrigger",
       "typeVersion": 1,
-      "position": [250, 550],
+      "position": [
+        250,
+        550
+      ],
       "credentials": {
-        "googleDriveOAuth2Api": { "id": "2", "name": "Google Drive OAuth2" }
+        "googleDriveOAuth2Api": {
+          "id": "2",
+          "name": "Google Drive OAuth2"
+        }
       }
     },
     {
@@ -51,7 +83,10 @@
       "name": "Merge Sources",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 2,
-      "position": [550, 420]
+      "position": [
+        550,
+        420
+      ]
     },
     {
       "parameters": {
@@ -63,9 +98,15 @@
       "name": "Download File",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 2,
-      "position": [750, 420],
+      "position": [
+        750,
+        420
+      ],
       "credentials": {
-        "googleDriveOAuth2Api": { "id": "2", "name": "Google Drive OAuth2" }
+        "googleDriveOAuth2Api": {
+          "id": "2",
+          "name": "Google Drive OAuth2"
+        }
       }
     },
     {
@@ -83,9 +124,15 @@
       "name": "Google Document AI",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [950, 420],
+      "position": [
+        950,
+        420
+      ],
       "credentials": {
-        "googleApi": { "id": "3", "name": "Google Document AI API" }
+        "googleApi": {
+          "id": "3",
+          "name": "Google Document AI API"
+        }
       }
     },
     {
@@ -96,7 +143,10 @@
       "name": "Parse OCR Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1150, 420]
+      "position": [
+        1150,
+        420
+      ]
     },
     {
       "parameters": {
@@ -114,7 +164,10 @@
       "name": "IF Confidence OK",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [1350, 420]
+      "position": [
+        1350,
+        420
+      ]
     },
     {
       "parameters": {
@@ -126,9 +179,15 @@
       "name": "Read Existing Invoices",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
-      "position": [1550, 320],
+      "position": [
+        1550,
+        320
+      ],
       "credentials": {
-        "googleSheetsOAuth2Api": { "id": "4", "name": "Google Sheets OAuth2" }
+        "googleSheetsOAuth2Api": {
+          "id": "4",
+          "name": "Google Sheets OAuth2"
+        }
       }
     },
     {
@@ -139,7 +198,10 @@
       "name": "Check Dedupe",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1550, 520]
+      "position": [
+        1550,
+        520
+      ]
     },
     {
       "parameters": {
@@ -156,7 +218,10 @@
       "name": "IF Not Duplicate",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [1750, 520]
+      "position": [
+        1750,
+        520
+      ]
     },
     {
       "parameters": {
@@ -166,7 +231,10 @@
       "name": "Build Invoice Row",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1950, 420]
+      "position": [
+        1950,
+        420
+      ]
     },
     {
       "parameters": {
@@ -176,7 +244,10 @@
       "name": "Build Duplicate Row",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1950, 620]
+      "position": [
+        1950,
+        620
+      ]
     },
     {
       "parameters": {
@@ -213,9 +284,15 @@
       "name": "Append to Sheets",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
-      "position": [2150, 420],
+      "position": [
+        2150,
+        420
+      ],
       "credentials": {
-        "googleSheetsOAuth2Api": { "id": "4", "name": "Google Sheets OAuth2" }
+        "googleSheetsOAuth2Api": {
+          "id": "4",
+          "name": "Google Sheets OAuth2"
+        }
       }
     },
     {
@@ -226,7 +303,10 @@
       "name": "Build Telegram Message",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2350, 420]
+      "position": [
+        2350,
+        420
+      ]
     },
     {
       "parameters": {
@@ -240,9 +320,15 @@
       "name": "Telegram Notify Owner",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
-      "position": [2550, 420],
+      "position": [
+        2550,
+        420
+      ],
       "credentials": {
-        "telegramApi": { "id": "5", "name": "Telegram Bot API" }
+        "telegramApi": {
+          "id": "5",
+          "name": "Telegram Bot API"
+        }
       }
     },
     {
@@ -253,7 +339,10 @@
       "name": "Build Low Confidence Row",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1550, 620]
+      "position": [
+        1550,
+        620
+      ]
     },
     {
       "parameters": {
@@ -290,9 +379,15 @@
       "name": "Append Low Confidence to Sheets",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
-      "position": [1750, 720],
+      "position": [
+        1750,
+        720
+      ],
       "credentials": {
-        "googleSheetsOAuth2Api": { "id": "4", "name": "Google Sheets OAuth2" }
+        "googleSheetsOAuth2Api": {
+          "id": "4",
+          "name": "Google Sheets OAuth2"
+        }
       }
     },
     {
@@ -301,7 +396,10 @@
       "name": "Error Trigger",
       "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
-      "position": [250, 800]
+      "position": [
+        250,
+        800
+      ]
     },
     {
       "parameters": {
@@ -315,66 +413,208 @@
       "name": "Telegram Error Admin",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
-      "position": [500, 800],
+      "position": [
+        500,
+        800
+      ],
       "credentials": {
-        "telegramApi": { "id": "5", "name": "Telegram Bot API" }
+        "telegramApi": {
+          "id": "5",
+          "name": "Telegram Bot API"
+        }
       }
     }
   ],
   "connections": {
     "Gmail Trigger": {
-      "main": [[{ "node": "Merge Sources", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Merge Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Google Drive Trigger": {
-      "main": [[{ "node": "Merge Sources", "type": "main", "index": 1 }]]
+      "main": [
+        [
+          {
+            "node": "Merge Sources",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
     },
     "Merge Sources": {
-      "main": [[{ "node": "Download File", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Download File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Download File": {
-      "main": [[{ "node": "Google Document AI", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Google Document AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Google Document AI": {
-      "main": [[{ "node": "Parse OCR Response", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Parse OCR Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Parse OCR Response": {
-      "main": [[{ "node": "IF Confidence OK", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "IF Confidence OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "IF Confidence OK": {
       "main": [
-        [{ "node": "Read Existing Invoices", "type": "main", "index": 0 }],
-        [{ "node": "Build Low Confidence Row", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Read Existing Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Low Confidence Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Read Existing Invoices": {
-      "main": [[{ "node": "Check Dedupe", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Check Dedupe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Check Dedupe": {
-      "main": [[{ "node": "IF Not Duplicate", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "IF Not Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "IF Not Duplicate": {
       "main": [
-        [{ "node": "Build Invoice Row", "type": "main", "index": 0 }],
-        [{ "node": "Build Duplicate Row", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Build Invoice Row",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Duplicate Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Build Invoice Row": {
-      "main": [[{ "node": "Append to Sheets", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Append to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Build Duplicate Row": {
-      "main": [[{ "node": "Append to Sheets", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Append to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Append to Sheets": {
-      "main": [[{ "node": "Build Telegram Message", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Build Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Build Telegram Message": {
-      "main": [[{ "node": "Telegram Notify Owner", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Telegram Notify Owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Build Low Confidence Row": {
-      "main": [[{ "node": "Append Low Confidence to Sheets", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Append Low Confidence to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Error Trigger": {
-      "main": [[{ "node": "Telegram Error Admin", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Telegram Error Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {

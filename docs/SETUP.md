@@ -109,9 +109,22 @@ curl http://localhost:5678/webhook/health  # if you add a health endpoint
    - **Google OAuth2 API**: Use `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
    - **Telegram API**: Use `TELEGRAM_BOT_TOKEN`
    - **Header Auth** (for HMAC): Name `WEBHOOK_HMAC_SECRET`, Value from `.env`
-4. **Workflows** → **Import** → Load `n8n-workflows/01-invoice-ingestion.json`, `02-approval-handler.json`, `03-reminder-escalation.json`
+4. **Workflows** → **Import** → Load each workflow JSON:
+   - `n8n-workflows/01-invoice-ingestion.json`
+   - `n8n-workflows/02-approval-handler.json`
+   - `n8n-workflows/03-reminder-escalation.json`
 5. Configure each workflow's credentials (Google, Telegram, HMAC)
-6. Activate all workflows
+6. **Activate** each workflow via toggle switch (top-right)
+7. Verify webhook registered:
+   - Open workflow 02 → click Webhook node → check "Production URL" is shown
+   - Test: `curl -X POST http://localhost:5678/webhook/approve` should return 401 (not 404)
+
+**⚠️ Import Dedup Warning**: n8n `import:workflow` does NOT auto-dedup. If you re-import, you will get **duplicate workflows**. To avoid this:
+- **Option A (recommended)**: Delete old workflow from n8n UI first, then import new one
+- **Option B**: Use n8n CLI: `n8n import:workflow --input=file.json --separate` (imports as new copy)
+- After import, **delete the old/duplicate** from n8n UI before activating
+
+**⚠️ CLI Import Note**: `n8n import:workflow` always sets `active=false` regardless of JSON. You MUST activate manually after import.
 
 ### 7. Test End-to-End
 1. Upload test invoice (PDF/image) to `Invoices_Incoming` Drive folder

@@ -12,17 +12,23 @@
       "name": "Webhook: Approve",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
-      "position": [250, 400]
+      "position": [
+        250,
+        400
+      ]
     },
     {
       "parameters": {
-        "jsCode": "// HMAC-SHA256 Verification (ADR-005)\n// Verifies webhook signature + timestamp freshness\n// Note: crypto is a Node.js global, no require needed\n\nconst item = $input.first();\nconst body = item.json.body || {};\nconst headers = item.json.headers || {};\n\n// Read HMAC secret from environment\nconst secret = $env.WEBHOOK_HMAC_SECRET;\nconst tolerance = parseInt($env.WEBHOOK_TIMESTAMP_TOLERANCE || '300', 10);\n\nif (!secret) {\n  console.error('[HMAC] WEBHOOK_HMAC_SECRET not configured');\n  return [{ json: { valid: false, error: 'HMAC secret not configured' } }];\n}\n\n// Extract signature and timestamp from headers\nconst signature = headers['x-signature'] || headers['X-Signature'] || '';\nconst timestamp = parseInt(headers['x-timestamp'] || headers['X-Timestamp'] || '0', 10);\n\nif (!signature || !timestamp) {\n  console.error('[HMAC] Missing signature or timestamp header');\n  return [{ json: { valid: false, error: 'Missing signature or timestamp' } }];\n}\n\n// Replay protection: reject if timestamp is too old or too far in future\nconst now = Math.floor(Date.now() / 1000);\nif (Math.abs(now - timestamp) > tolerance) {\n  console.error('[HMAC] Timestamp expired: diff=' + Math.abs(now - timestamp) + 's tolerance=' + tolerance + 's');\n  return [{ json: { valid: false, error: 'Timestamp expired or too far in future' } }];\n}\n\n// Compute expected signature\nconst payloadStr = JSON.stringify(body);\nconst message = payloadStr + '.' + timestamp;\nconst expectedSig = 'sha256=' + crypto.createHmac('sha256', secret).update(message).digest('hex');\n\n// Constant-time comparison\ntry {\n  const sigBuf = Buffer.from(signature, 'utf8');\n  const expectedBuf = Buffer.from(expectedSig, 'utf8');\n\n  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {\n    console.error('[HMAC] Signature mismatch');\n    return [{ json: { valid: false, error: 'Invalid signature' } }];\n  }\n} catch (e) {\n  console.error('[HMAC] Comparison error: ' + e.message);\n  return [{ json: { valid: false, error: 'Signature verification failed' } }];\n}\n\nconsole.log('[HMAC] Signature valid for action=' + body.action + ' invoice_id=' + body.invoice_id);\n\nreturn [{\n  json: {\n    valid: true,\n    invoice_id: body.invoice_id || '',\n    action: body.action || '',\n    reason: body.reason || '',\n    owner_id: body.owner_id || $env.TELEGRAM_OWNER_CHAT_ID || ''\n  }\n}];"
+        "jsCode": "// HMAC-SHA256 Verification (ADR-005)\n// Verifies webhook signature + timestamp freshness\n// Safe crypto access: try global, fallback to require\n\nvar nodeCrypto;\ntry {\n  if (typeof crypto !== 'undefined' && typeof crypto.createHmac === 'function') {\n    nodeCrypto = crypto;\n  } else {\n    nodeCrypto = require('crypto');\n  }\n} catch (e) {\n  nodeCrypto = require('crypto');\n}\n\nvar item = $input.first();\nvar body = item.json.body || {};\nvar headers = item.json.headers || {};\n\n// Read HMAC secret from environment\nvar secret = $env.WEBHOOK_HMAC_SECRET;\nvar tolerance = parseInt($env.WEBHOOK_TIMESTAMP_TOLERANCE || '300', 10);\n\nif (!secret) {\n  console.error('[HMAC] WEBHOOK_HMAC_SECRET not configured');\n  return [{ json: { valid: false, error: 'HMAC secret not configured' } }];\n}\n\n// Extract signature and timestamp from headers\nvar signature = headers['x-signature'] || headers['X-Signature'] || '';\nvar timestamp = parseInt(headers['x-timestamp'] || headers['X-Timestamp'] || '0', 10);\n\nif (!signature || !timestamp) {\n  console.error('[HMAC] Missing signature or timestamp header');\n  return [{ json: { valid: false, error: 'Missing signature or timestamp' } }];\n}\n\n// Replay protection: reject if timestamp is too old or too far in future\nvar now = Math.floor(Date.now() / 1000);\nif (Math.abs(now - timestamp) > tolerance) {\n  console.error('[HMAC] Timestamp expired: diff=' + Math.abs(now - timestamp) + 's tolerance=' + tolerance + 's');\n  return [{ json: { valid: false, error: 'Timestamp expired or too far in future' } }];\n}\n\n// Compute expected signature (sorted keys to match Python json.dumps(sort_keys=True))\nvar payloadStr = JSON.stringify(body, Object.keys(body).sort());\nvar message = payloadStr + '.' + timestamp;\nvar expectedSig = 'sha256=' + nodeCrypto.createHmac('sha256', secret).update(message).digest('hex');\n\n// Constant-time comparison\ntry {\n  var sigBuf = Buffer.from(signature, 'utf8');\n  var expectedBuf = Buffer.from(expectedSig, 'utf8');\n\n  if (sigBuf.length !== expectedBuf.length || !nodeCrypto.timingSafeEqual(sigBuf, expectedBuf)) {\n    console.error('[HMAC] Signature mismatch');\n    return [{ json: { valid: false, error: 'Invalid signature' } }];\n  }\n} catch (e) {\n  console.error('[HMAC] Comparison error: ' + e.message);\n  return [{ json: { valid: false, error: 'Signature verification failed' } }];\n}\n\nconsole.log('[HMAC] Signature valid for action=' + body.action + ' invoice_id=' + body.invoice_id);\n\nreturn [{\n  json: {\n    valid: true,\n    invoice_id: body.invoice_id || '',\n    action: body.action || '',\n    reason: body.reason || '',\n    owner_id: body.owner_id || $env.TELEGRAM_OWNER_CHAT_ID || ''\n  }\n}];"
       },
       "id": "310",
       "name": "HMAC Verification",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [480, 400]
+      "position": [
+        480,
+        400
+      ]
     },
     {
       "parameters": {
@@ -39,7 +45,10 @@
       "name": "IF Valid Signature",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [700, 400]
+      "position": [
+        700,
+        400
+      ]
     },
     {
       "parameters": {
@@ -53,7 +62,10 @@
       "name": "Respond 401",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [920, 280]
+      "position": [
+        920,
+        280
+      ]
     },
     {
       "parameters": {
@@ -73,9 +85,15 @@
       "name": "Find Invoice",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
-      "position": [920, 400],
+      "position": [
+        920,
+        400
+      ],
       "credentials": {
-        "googleSheetsOAuth2Api": { "id": "4", "name": "Google Sheets OAuth2" }
+        "googleSheetsOAuth2Api": {
+          "id": "4",
+          "name": "Google Sheets OAuth2"
+        }
       }
     },
     {
@@ -86,7 +104,10 @@
       "name": "Check Status",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1140, 400]
+      "position": [
+        1140,
+        400
+      ]
     },
     {
       "parameters": {
@@ -103,7 +124,10 @@
       "name": "IF Processable",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [1360, 400]
+      "position": [
+        1360,
+        400
+      ]
     },
     {
       "parameters": {
@@ -117,7 +141,10 @@
       "name": "Respond Not Processable",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [1580, 280]
+      "position": [
+        1580,
+        280
+      ]
     },
     {
       "parameters": {
@@ -159,8 +186,12 @@
               "fieldType": "options",
               "requiredField": true,
               "options": [
-                { "option": "Approve" },
-                { "option": "Reject" }
+                {
+                  "option": "Approve"
+                },
+                {
+                  "option": "Reject"
+                }
               ]
             },
             {
@@ -185,7 +216,10 @@
       "name": "Approval Form",
       "type": "n8n-nodes-base.form",
       "typeVersion": 1,
-      "position": [1580, 400]
+      "position": [
+        1580,
+        400
+      ]
     },
     {
       "parameters": {
@@ -195,7 +229,10 @@
       "name": "Process Decision",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1800, 400]
+      "position": [
+        1800,
+        400
+      ]
     },
     {
       "parameters": {
@@ -212,7 +249,10 @@
       "name": "IF Decision Valid",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [2020, 400]
+      "position": [
+        2020,
+        400
+      ]
     },
     {
       "parameters": {
@@ -226,7 +266,10 @@
       "name": "Respond Invalid Decision",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [2240, 280]
+      "position": [
+        2240,
+        280
+      ]
     },
     {
       "parameters": {
@@ -257,9 +300,15 @@
       "name": "Update Sheets Status",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
-      "position": [2240, 400],
+      "position": [
+        2240,
+        400
+      ],
       "credentials": {
-        "googleSheetsOAuth2Api": { "id": "4", "name": "Google Sheets OAuth2" }
+        "googleSheetsOAuth2Api": {
+          "id": "4",
+          "name": "Google Sheets OAuth2"
+        }
       }
     },
     {
@@ -270,7 +319,10 @@
       "name": "Build Admin Notification",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2460, 350]
+      "position": [
+        2460,
+        350
+      ]
     },
     {
       "parameters": {
@@ -280,7 +332,10 @@
       "name": "Build Owner Confirmation",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2460, 500]
+      "position": [
+        2460,
+        500
+      ]
     },
     {
       "parameters": {
@@ -294,9 +349,15 @@
       "name": "Telegram Notify Admin",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
-      "position": [2680, 350],
+      "position": [
+        2680,
+        350
+      ],
       "credentials": {
-        "telegramApi": { "id": "5", "name": "Telegram Bot API" }
+        "telegramApi": {
+          "id": "5",
+          "name": "Telegram Bot API"
+        }
       }
     },
     {
@@ -311,9 +372,15 @@
       "name": "Telegram Confirm Owner",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
-      "position": [2680, 500],
+      "position": [
+        2680,
+        500
+      ],
       "credentials": {
-        "telegramApi": { "id": "5", "name": "Telegram Bot API" }
+        "telegramApi": {
+          "id": "5",
+          "name": "Telegram Bot API"
+        }
       }
     },
     {
@@ -322,7 +389,10 @@
       "name": "Error Trigger",
       "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
-      "position": [250, 700]
+      "position": [
+        250,
+        700
+      ]
     },
     {
       "parameters": {
@@ -336,65 +406,187 @@
       "name": "Telegram Error Admin",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
-      "position": [500, 700],
+      "position": [
+        500,
+        700
+      ],
       "credentials": {
-        "telegramApi": { "id": "5", "name": "Telegram Bot API" }
+        "telegramApi": {
+          "id": "5",
+          "name": "Telegram Bot API"
+        }
       }
     }
   ],
   "connections": {
     "Webhook: Approve": {
-      "main": [[{ "node": "HMAC Verification", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "HMAC Verification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "HMAC Verification": {
-      "main": [[{ "node": "IF Valid Signature", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "IF Valid Signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "IF Valid Signature": {
       "main": [
-        [{ "node": "Find Invoice", "type": "main", "index": 0 }],
-        [{ "node": "Respond 401", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Find Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 401",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Find Invoice": {
-      "main": [[{ "node": "Check Status", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Check Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Check Status": {
-      "main": [[{ "node": "IF Processable", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "IF Processable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "IF Processable": {
       "main": [
-        [{ "node": "Approval Form", "type": "main", "index": 0 }],
-        [{ "node": "Respond Not Processable", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Approval Form",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Not Processable",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Approval Form": {
-      "main": [[{ "node": "Process Decision", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Process Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Process Decision": {
-      "main": [[{ "node": "IF Decision Valid", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "IF Decision Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "IF Decision Valid": {
       "main": [
-        [{ "node": "Update Sheets Status", "type": "main", "index": 0 }],
-        [{ "node": "Respond Invalid Decision", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Update Sheets Status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Invalid Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Update Sheets Status": {
       "main": [
         [
-          { "node": "Build Admin Notification", "type": "main", "index": 0 },
-          { "node": "Build Owner Confirmation", "type": "main", "index": 0 }
+          {
+            "node": "Build Admin Notification",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Owner Confirmation",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
     "Build Admin Notification": {
-      "main": [[{ "node": "Telegram Notify Admin", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Telegram Notify Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Build Owner Confirmation": {
-      "main": [[{ "node": "Telegram Confirm Owner", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Telegram Confirm Owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Error Trigger": {
-      "main": [[{ "node": "Telegram Error Admin", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Telegram Error Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {

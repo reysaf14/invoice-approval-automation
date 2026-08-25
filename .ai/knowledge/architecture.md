@@ -134,6 +134,7 @@ WEBHOOK_TIMESTAMP_TOLERANCE=300  # seconds
 - **Audit Trail**: Setiap status change write `updated_at`, `approved_by`, `reject_reason`. Sheets version history sebagai backup audit.
 - **PII in Telegram**: Pesan hanya ringkasan (vendor, nominal, no invoice). Data lengkap di Sheets (access controlled). Callback data hanya `invoice_id|action`.
 - **Command Injection Prevention**: Jika n8n Execute Command node dipakai (tidak direncanakan), Engineer WAJIB avoid string interpolation dari data eksternal ke shell command.
+- **[QA-7] Webhook Registration Blocker**: Production webhook 404 terdeteksi QA pada n8n v1.60.0 & v1.74.0 (`webhook_entity` kosong meski workflow aktif; CLI/REST/UI toggle semuanya gagal persist registrasi). WAJIB ikuti dual-track plan di ADR-006: Track A root-cause isolation (timebox 48 jam) + Track B polling-based fallback yang bekerja TANPA inbound webhook sama sekali.
 
 ## 7. Catatan Khusus
 
@@ -143,6 +144,8 @@ WEBHOOK_TIMESTAMP_TOLERANCE=300  # seconds
 - **Reminder Cron**: Workflow terpisah `03-reminder-escalation` jalan tiap 15 menit. Baca Sheets filter `status="Pending Approval" AND reminder_count < 3 AND created_at < now() - interval`.
 - **Approval Form URL**: n8n Form node generate URL unik per execution. Validasi `invoice_id` di form hidden field.
 - **Error Handling**: Setiap workflow punya Error Trigger → Telegram ke Admin + log ke Sheets tab `Errors`.
+- **[QA-7] Track A (Root Cause Isolation)**: Urutan verifikasi wajib: (1) pastikan instance memakai SATU database saja (hindari DB split-brain antara compose single-mode vs queue-mode), (2) jika tetap queue mode — jalankan service `n8n webhook` terpisah sesuai arsitektur queue n8n, ATAU turun ke regular mode (volume 120/bln tidak butuh queue), (3) test bare-metal `npx n8n` tanpa Docker untuk isolasi faktor environment, (4) audit konsistensi `WEBHOOK_URL` / `N8N_HOST` / `N8N_PROTOCOL`.
+- **[QA-7] Track B (Fallback Polling)**: Jalur approval TANPA webhook: Telegram Trigger mode polling (getUpdates) + Google Apps Script Web App menulis aksi ke tab `Approval_Actions` + Schedule Trigger n8n memproses tiap 1 menit. Detail lengkap di ADR-006. Implementasi: Engineer; verifikasi: QA REGRESSION #8.
 - **Backup**: PostgreSQL dump harian (cron di host). Sheets: manual export mingguan / Google Drive backup.
 
 ## 8. Riwayat Perubahan
@@ -150,3 +153,4 @@ WEBHOOK_TIMESTAMP_TOLERANCE=300  # seconds
 | Versi | Tanggal | Perubahan | ADR Terkait |
 |-------|---------|-----------|-------------|
 | v1 | 2026-08-12 | Desain awal | ADR-001, ADR-002, ADR-003, ADR-004, ADR-005 |
+| v2 | 2026-08-25 | Respons QA REGRESSION #7: catat webhook blocker + dual-track plan (root-cause isolation & polling fallback) | ADR-006 |

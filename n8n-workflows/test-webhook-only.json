@@ -6,7 +6,6 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "test-webhook",
-        "webhookId": "test-webhook-single-mode",
         "options": {}
       },
       "id": "test-webhook",
@@ -16,7 +15,8 @@
       "position": [
         250,
         300
-      ]
+      ],
+      "webhookId": "test-webhook-single-mode"
     },
     {
       "parameters": {

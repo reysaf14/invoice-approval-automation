@@ -6,8 +6,9 @@ services:
     image: n8nio/n8n:1.74.0
     container_name: n8n-main
     restart: unless-stopped
+    # NOTE(A2): public port moved to n8n-webhook; main UI exposed on 5682
     ports:
-      - "5678:5678"
+      - "5682:5678"
     environment:
       # Core
       - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
@@ -102,6 +103,56 @@ services:
           memory: 1G
         reservations:
           memory: 512M
+
+  # ==========================================
+  # n8n Webhook Processor (queue mode: dedicated
+  # process that serves inbound webhook traffic)
+  # ==========================================
+  n8n-webhook:
+    image: n8nio/n8n:1.74.0
+    container_name: n8n-webhook
+    restart: unless-stopped
+    command: webhook
+    ports:
+      - "5678:5678"   # PUBLIC entrypoint (unchanged contract: WEBHOOK_URL=:5678)
+    environment:
+      - N8N_HOST=${N8N_HOST}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=${N8N_PROTOCOL}
+      - WEBHOOK_URL=${WEBHOOK_URL}
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+      - N8N_MODE=queue
+      - EXECUTIONS_MODE=queue
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      # Database (same DB as main/worker)
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_DATABASE=${DB_POSTGRESDB_DATABASE}
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_USER=${DB_POSTGRESDB_USER}
+      - DB_POSTGRESDB_PASSWORD=${DB_POSTGRESDB_PASSWORD}
+      # Redis Queue
+      - QUEUE_BULL_REDIS_HOST=redis
+      - QUEUE_BULL_REDIS_PORT=6379
+      # Logging
+      - N8N_LOG_LEVEL=info
+      - N8N_LOG_OUTPUT=console
+      - NODE_OPTIONS=--dns-result-order=ipv4first
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - n8n-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   # ==========================================
   # PostgreSQL (n8n metadata + executions)

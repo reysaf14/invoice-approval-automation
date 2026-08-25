@@ -1,5 +1,31 @@
 # Operations Guide - Invoice Approval Automation
 
+## n8n API Reference
+
+### Workflow Activation
+```bash
+# Activate workflow (CORRECT endpoint - PATCH not allowed)
+POST /api/v1/workflows/{workflowId}/activate
+
+# Example:
+curl -X POST http://localhost:5678/api/v1/workflows/iAbSuXdKGW0DzVdV/activate \
+  -H "Authorization: Bearer <N8N_API_KEY>" \
+  -H "Content-Type: application/json"
+
+# Note: PATCH /api/v1/workflows/{id} returns 405 (Method Not Allowed)
+```
+
+### Workflow Import
+```bash
+# Import via CLI (sets active=false always)
+docker-compose exec n8n n8n import:workflow --input=/path/to/workflow.json
+
+# Delete duplicate workflows after re-import
+# Must delete from n8n UI or via API
+```
+
+---
+
 ## Daily Operations
 
 ### Monitoring (Run Daily)

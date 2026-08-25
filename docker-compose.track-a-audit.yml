@@ -1,0 +1,194 @@
+# ============================================================
+# TRACK A AUDIT RIG (ADR-006) - EXPERIMENT ONLY, NOT PRODUCTION
+# Reproduces webhook registration behavior in isolation:
+#   profile "queue"   -> replica of production queue-mode stack (port 5680)
+#   profile "regular" -> control stack, regular mode        (port 5681)
+# Scratch DB + scratch volumes. Dummy credentials only.
+# Usage:
+#   docker compose -f docker-compose.track-a-audit.yml --profile queue up -d
+#   docker compose -f docker-compose.track-a-audit.yml --profile regular up -d
+#   docker compose -f docker-compose.track-a-audit.yml down -v --remove-orphans
+# ============================================================
+name: track-a-audit
+
+services:
+  # ------------------------------------------
+  # Scratch PostgreSQL (fresh per phase via down -v)
+  # ------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: ta-postgres
+    restart: "no"
+    environment:
+      - POSTGRES_DB=n8n
+      - POSTGRES_USER=n8n
+      - POSTGRES_PASSWORD=audit_only_not_a_real_secret
+    volumes:
+      - ta_pgdata:/var/lib/postgresql/data
+    networks:
+      - ta-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U n8n -d n8n"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # ------------------------------------------
+  # Redis (only consumed by queue profile)
+  # ------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: ta-redis
+    restart: "no"
+    command: redis-server --appendonly no
+    networks:
+      - ta-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # ------------------------------------------
+  # PHASE 1: Queue-mode replica (mirrors docker-compose.yml)
+  # ------------------------------------------
+  n8n-queue:
+    image: n8nio/n8n:1.74.0
+    container_name: ta-n8n-queue
+    restart: "no"
+    profiles: ["queue"]
+    ports:
+      - "5680:5678"
+    environment:
+      # Core - mirrors production values where safe (host/protocol/timezone)
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5680/webhook
+      - GENERIC_TIMEZONE=Asia/Jakarta
+      - N8N_MODE=queue
+      - EXECUTIONS_MODE=queue
+      - N8N_ENCRYPTION_KEY=tracka_audit_encryption_key_0123456789abcdef
+      # Database - mirrors production naming convention
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_DATABASE=n8n
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_USER=n8n
+      - DB_POSTGRESDB_PASSWORD=audit_only_not_a_real_secret
+      # Redis queue
+      - QUEUE_BULL_REDIS_HOST=redis
+      - QUEUE_BULL_REDIS_PORT=6379
+      # Logging
+      - N8N_LOG_LEVEL=info
+      - N8N_LOG_OUTPUT=console
+      - NODE_OPTIONS=--dns-result-order=ipv4first
+    volumes:
+      - ta_n8n_home_queue:/home/node/.n8n
+      - ./scripts/track-a-workflows:/home/node/workflows:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ta-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:5678/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # ------------------------------------------
+  # PHASE 2: Regular-mode control (single process)
+  # ------------------------------------------
+  n8n-regular:
+    image: n8nio/n8n:1.74.0
+    container_name: ta-n8n-regular
+    restart: "no"
+    profiles: ["regular"]
+    ports:
+      - "5681:5678"
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5681/
+      - GENERIC_TIMEZONE=Asia/Jakarta
+      - N8N_MODE=regular
+      - EXECUTIONS_MODE=regular
+      - N8N_ENCRYPTION_KEY=tracka_audit_encryption_key_0123456789abcdef
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_DATABASE=n8n
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_USER=n8n
+      - DB_POSTGRESDB_PASSWORD=audit_only_not_a_real_secret
+      - N8N_LOG_LEVEL=info
+      - N8N_LOG_OUTPUT=console
+      - NODE_OPTIONS=--dns-result-order=ipv4first
+    volumes:
+      - ta_n8n_home_regular:/home/node/.n8n
+      - ./scripts/track-a-workflows:/home/node/workflows:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ta-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:5678/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # ------------------------------------------
+  # PHASE 1b: Queue worker (production topology fidelity)
+  # ------------------------------------------
+  n8n-queue-worker:
+    image: n8nio/n8n:1.74.0
+    container_name: ta-n8n-queue-worker
+    restart: "no"
+    profiles: ["queue"]
+    command: worker
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5680/webhook
+      - GENERIC_TIMEZONE=Asia/Jakarta
+      - N8N_MODE=queue
+      - EXECUTIONS_MODE=queue
+      - N8N_ENCRYPTION_KEY=tracka_audit_encryption_key_0123456789abcdef
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_DATABASE=n8n
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_USER=n8n
+      - DB_POSTGRESDB_PASSWORD=audit_only_not_a_real_secret
+      - QUEUE_BULL_REDIS_HOST=redis
+      - QUEUE_BULL_REDIS_PORT=6379
+      - N8N_LOG_LEVEL=info
+      - N8N_LOG_OUTPUT=console
+      - NODE_OPTIONS=--dns-result-order=ipv4first
+    volumes:
+      - ta_n8n_home_queue:/home/node/.n8n
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      n8n-queue:
+        condition: service_healthy
+    networks:
+      - ta-network
+
+volumes:
+  ta_pgdata:
+  ta_n8n_home_queue:
+  ta_n8n_home_regular:
+
+networks:
+  ta-network:
+    driver: bridge

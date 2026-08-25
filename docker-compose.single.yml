@@ -15,7 +15,7 @@ services:
       - N8N_HOST=localhost
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
-      - WEBHOOK_URL=http://localhost:5679/webhook
+      - WEBHOOK_URL=http://localhost:5679  # A4 fix: base URL, tanpa sufiks
       - GENERIC_TIMEZONE=Asia/Jakarta
       # Single mode (not queue)
       - N8N_MODE=regular

@@ -170,6 +170,45 @@ invoice-approval-automation/
 
 ---
 
+## Webhook Registration Troubleshooting (n8n v1.60)
+
+### Problem: Webhook returns 404 after activation
+**Symptom**: Workflow shows "Active" but `POST /webhook/approve` returns 404.
+
+**Root Cause 1: Queue Mode**
+- n8n v1.60 queue mode (`N8N_MODE=queue`) may not register webhooks on main instance
+- Webhooks might be handled by worker (which doesn't listen on port 5678)
+
+**Fix**: Test in single mode first:
+```bash
+# Use single mode compose file
+docker-compose -f docker-compose.single.yml up -d
+# Import test-webhook-only.json
+# Activate via UI
+# Test: curl -X POST http://localhost:5679/webhook/test-webhook
+```
+
+**Root Cause 2: Missing Credentials**
+- Workflow nodes with missing credentials (Google Sheets, Telegram) can cause silent webhook registration failure
+- n8n may skip webhook registration if any credential is invalid
+
+**Fix**: Create stub credentials in n8n UI for all referenced services, OR ensure all credentials are properly configured before activation.
+
+**Root Cause 3: webhookId Missing**
+- n8n v1.60 requires `webhookId` parameter on Webhook node for production registration
+- Only UI activation generates webhookId automatically; CLI/import does not
+
+**Fix**: Add `webhookId` to workflow JSON (already done in 02-approval-handler.json) or activate via UI.
+
+**Verification**:
+```bash
+# Check webhook_entity table in PostgreSQL
+docker-compose exec postgres psql -U n8n -d n8n -c "SELECT * FROM webhook_entity;"
+# Should return rows if webhooks registered
+```
+
+---
+
 ## Production Checklist
 
 - [ ] Use HTTPS domain (reverse proxy: Nginx/Traefik + Let's Encrypt)

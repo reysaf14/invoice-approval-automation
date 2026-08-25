@@ -3,7 +3,7 @@ services:
   # n8n Main (Webhook receiver, UI, scheduler)
   # ==========================================
   n8n:
-    image: n8nio/n8n:1.60.0
+    image: n8nio/n8n:1.74.0
     container_name: n8n-main
     restart: unless-stopped
     ports:
@@ -57,7 +57,7 @@ services:
   # n8n Worker (Queue execution)
   # ==========================================
   n8n-worker:
-    image: n8nio/n8n:1.60.0
+    image: n8nio/n8n:1.74.0
     container_name: n8n-worker
     restart: unless-stopped
     command: worker

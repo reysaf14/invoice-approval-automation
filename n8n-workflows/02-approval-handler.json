@@ -6,8 +6,7 @@
         "httpMethod": "POST",
         "path": "approve",
         "responseMode": "responseNode",
-        "options": {},
-        "webhookId": "6d3e293d-b59d-5ff6-b54b-c0cbe86d8080"
+        "options": {}
       },
       "id": "300",
       "name": "Webhook: Approve",
@@ -16,7 +15,8 @@
       "position": [
         250,
         400
-      ]
+      ],
+      "webhookId": "6d3e293d-b59d-5ff6-b54b-c0cbe86d8080"
     },
     {
       "parameters": {

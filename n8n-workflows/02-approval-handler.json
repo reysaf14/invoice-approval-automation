@@ -13,8 +13,8 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
       "position": [
-        250,
-        400
+        0,
+        220
       ],
       "webhookId": "6d3e293d-b59d-5ff6-b54b-c0cbe86d8080"
     },
@@ -27,8 +27,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        480,
-        400
+        240,
+        220
       ]
     },
     {
@@ -47,8 +47,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
       "position": [
-        700,
-        400
+        480,
+        220
       ]
     },
     {
@@ -64,8 +64,8 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [
-        920,
-        280
+        480,
+        0
       ]
     },
     {
@@ -87,8 +87,8 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
       "position": [
-        920,
-        400
+        720,
+        220
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
@@ -106,8 +106,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1140,
-        400
+        960,
+        220
       ]
     },
     {
@@ -126,8 +126,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
       "position": [
-        1360,
-        400
+        1200,
+        220
       ]
     },
     {
@@ -143,8 +143,8 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [
-        1580,
-        280
+        1200,
+        0
       ]
     },
     {
@@ -218,8 +218,8 @@
       "type": "n8n-nodes-base.formTrigger",
       "typeVersion": 1,
       "position": [
-        1580,
-        400
+        0,
+        520
       ]
     },
     {
@@ -231,8 +231,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1800,
-        400
+        240,
+        520
       ]
     },
     {
@@ -251,8 +251,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
       "position": [
-        2020,
-        400
+        480,
+        520
       ]
     },
     {
@@ -268,8 +268,8 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [
-        2240,
-        280
+        480,
+        760
       ]
     },
     {
@@ -302,8 +302,8 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
       "position": [
-        2240,
-        400
+        720,
+        520
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
@@ -321,8 +321,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2460,
-        350
+        960,
+        440
       ]
     },
     {
@@ -334,8 +334,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2460,
-        500
+        960,
+        620
       ]
     },
     {
@@ -351,13 +351,13 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
       "position": [
-        2680,
-        350
+        1200,
+        440
       ],
       "credentials": {
         "telegramApi": {
-          "id": "5",
-          "name": "Telegram Bot API"
+          "id": "8NjEduIbTMBL1yoi",
+          "name": "Telegram account"
         }
       }
     },
@@ -374,13 +374,13 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
       "position": [
-        2680,
-        500
+        1200,
+        620
       ],
       "credentials": {
         "telegramApi": {
-          "id": "5",
-          "name": "Telegram Bot API"
+          "id": "8NjEduIbTMBL1yoi",
+          "name": "Telegram account"
         }
       }
     },
@@ -391,8 +391,8 @@
       "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
       "position": [
-        250,
-        700
+        0,
+        900
       ]
     },
     {
@@ -408,13 +408,13 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
       "position": [
-        500,
-        700
+        240,
+        900
       ],
       "credentials": {
         "telegramApi": {
-          "id": "5",
-          "name": "Telegram Bot API"
+          "id": "8NjEduIbTMBL1yoi",
+          "name": "Telegram account"
         }
       }
     }

@@ -3,6 +3,7 @@
 
 # Credentials (Google SA, etc.)
 credentials/
+client_secret_*.json
 
 # System files
 .DS_Store

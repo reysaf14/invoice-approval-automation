@@ -1,196 +1,121 @@
-# Operations Guide - Invoice Approval Automation
+# Operations Guide
 
-## n8n API Reference
+Dokumen ini adalah checklist operasi untuk runtime Docker lokal atau staging. Sesuaikan nama service jika deployment memakai host berbeda.
 
-### Workflow Activation
-```bash
-# Activate workflow (CORRECT endpoint - PATCH not allowed)
-POST /api/v1/workflows/{workflowId}/activate
+## Status Runtime yang Diharapkan
 
-# Example:
-curl -X POST http://localhost:5678/api/v1/workflows/iAbSuXdKGW0DzVdV/activate \
-  -H "Authorization: Bearer <N8N_API_KEY>" \
-  -H "Content-Type: application/json"
+Pada runtime lokal yang terakhir diverifikasi:
 
-# Note: PATCH /api/v1/workflows/{id} returns 405 (Method Not Allowed)
+- `01-invoice-ingestion`: active.
+- `02-approval-handler`: active.
+- `03-reminder-escalation`: inactive.
+- n8n health endpoint: `ok`.
+
+Status tersebut dapat berubah setelah restart atau import ulang. Selalu cek UI/CLI sebelum menganggap workflow aktif.
+
+## Monitoring Harian
+
+```powershell
+docker compose ps
+docker compose logs --tail=100 n8n
+docker compose logs --tail=100 n8n-worker
+docker compose logs --tail=100 n8n-webhook
 ```
 
-### Workflow Import
-```bash
-# Import via CLI (sets active=false always)
-docker-compose exec n8n n8n import:workflow --input=/path/to/workflow.json
+Di UI n8n, periksa executions untuk:
 
-# Delete duplicate workflows after re-import
-# Must delete from n8n UI or via API
-```
+- `01-invoice-ingestion`: trigger, DeepSeek response, confidence branch, Sheets write, Telegram send.
+- `02-approval-handler`: HMAC result, invoice lookup, status guard, form, Sheets update.
+- `03-reminder-escalation`: hanya jika workflow sengaja diaktifkan.
 
----
+## Google Sheets Review
 
-## Daily Operations
+Filter tab invoice berdasarkan:
 
-### Monitoring (Run Daily)
-```bash
-# Check container health
-docker-compose ps
+- `Pending Approval`: menunggu keputusan.
+- `Low Confidence`: perlu pemeriksaan manual terhadap file asli.
+- `Duplicate`: jangan bayar sebelum membandingkan row asal.
+- `Approved`: siap diproses sesuai SOP pembayaran internal.
+- `Rejected`: baca `reject_reason`.
+- `Failed`: buka execution n8n dan periksa provider/credential.
 
-# Check n8n executions (last 24h)
-docker-compose exec n8n n8n list:executions --last=24h
+Jangan menghapus row lama hanya untuk merapikan tampilan; row tersebut dapat menjadi bagian dari audit trail.
 
-# Check failed executions
-docker-compose exec n8n n8n list:executions --status=error --last=24h
+## Telegram Health Check
 
-# View logs
-docker-compose logs --tail=100 n8n
-docker-compose logs --tail=100 n8n-worker
-```
+1. Pastikan bot tidak diblokir oleh recipient.
+2. Pastikan owner/admin sudah mengirim `/start` bila bot baru dibuat.
+3. Jalankan smoke test hanya pada data dummy agar tidak menambah row bisnis.
+4. Periksa bahwa notifikasi invoice baru berupa plain text tanpa link placeholder.
 
-### Google Sheets Checks
-- Open master spreadsheet → verify new rows added
-- Filter by `Status = "Pending Approval"` → check aging (>24h)
-- Filter by `Status = "Failed"` / `"Low Confidence"` → investigate
+## Approval Webhook
 
-### Telegram Bot Health
-- Send `/start` to bot → should respond
-- Check Owner/Admin received test notification
+Endpoint approval memerlukan:
 
----
+- `POST /webhook/approve`.
+- Header `x-signature` dalam bentuk `sha256=<hex>`.
+- Header `x-timestamp` Unix seconds.
+- Canonical JSON body yang sama dengan payload signing.
+- `WEBHOOK_HMAC_SECRET` yang sama di caller dan n8n.
 
-## Weekly Operations
+Handler menolak request tanpa signature, timestamp kedaluwarsa, signature tidak cocok, invoice yang tidak ditemukan, atau invoice yang statusnya bukan `Pending Approval`.
 
-### 1. Accuracy Audit (Manual Sample)
-- Pick 10 random invoices from Sheets
-- Compare extracted fields vs original file in Drive
-- Track accuracy % → target ≥ 95%
-- If < 95%: Review Doc AI processor, consider custom processor training
+## Reminder dan Escalation
 
-### 2. Volume & Cost Review
-- Count invoices processed this week (Sheets row count)
-- Check Document AI usage in GCP Console → Billing
-- Verify within free tier or expected cost
-
-### 3. Reminder Effectiveness
-- Check `reminder_count` distribution in Sheets
-- % approved before 1h, 4h, 12h, 24h
-- Escalations triggered (>24h pending)
-
-### 4. Duplicate Rate
-- Count `Status = "Duplicate"` / Total processed
-- If > 5%: Investigate source (supplier double-send, Admin double-forward)
-
----
-
-## Monthly Operations
-
-### 1. Archive Old Data
-```bash
-# In Google Sheets:
-# 1. Filter Created_At < 2 years ago
-# 2. Copy to new sheet: Invoices_Archive_YYYY
-# 3. Delete from master (keep last 2 years)
-```
-
-### 2. Secret Rotation (Every 90 Days)
-```bash
-# Generate new HMAC secret
-openssl rand -hex 32
-# Update .env and n8n credentials (Header Auth)
-# Overlap: Keep old secret valid for 24h during transition
-```
-
-### 3. n8n Version Update
-```bash
-# Check current version
-docker-compose exec n8n n8n --version
-
-# Update (pin major version in docker-compose.yml)
-# image: n8nio/n8n:1.XX.X
-docker-compose pull
-docker-compose up -d
-```
-
-### 4. Backup Verification
-```bash
-# PostgreSQL backup
-docker-compose exec postgres pg_dump -U n8n n8n > backup_$(date +%Y%m%d).sql
-
-# Verify backup restorable (test on staging)
-```
-
----
+Workflow reminder memeriksa invoice pending setiap 15 menit dan memiliki tier berbasis umur invoice. Saat ini workflow tersebut tersedia di source tetapi inactive pada runtime lokal terakhir. Jangan mengiklankan reminder otomatis sebagai operationally active sebelum mengaktifkan dan melakukan smoke test.
 
 ## Incident Response
 
-### Scenario: Ingestion Stops (No new rows in Sheets)
-1. Check `docker-compose ps` - all containers running?
-2. Check n8n executions: `docker-compose exec n8n n8n list:executions --status=error --last=1h`
-3. Check Gmail/Drive trigger logs in n8n UI
-4. Common causes:
-   - Google OAuth token expired → Reconnect credentials in n8n
-   - Drive folder permission changed → Re-share with Service Account
-   - Doc AI quota exceeded → Check GCP billing
+### Tidak ada row baru
 
-### Scenario: Approval Not Working (Owner clicks, no update)
-1. Check n8n executions for `02-approval-handler` - errors?
-2. Verify webhook URL accessible: `curl -X POST <WEBHOOK_URL>/approve/test`
-3. Check HMAC secret matches in .env and n8n credentials
-4. Check Telegram callback format hasn't changed
+1. Cek `docker compose ps`.
+2. Cek Google Drive folder ID dan OAuth scope.
+3. Pastikan file JPG/JPEG/PNG.
+4. Buka execution terakhir dan cari node pertama yang gagal.
+5. Jika DeepSeek gagal, cek endpoint, model, quota, dan payload image.
 
-### Scenario: High "Low Confidence" Rate
-1. Sample failed invoices - check image quality (blur, rotation, crop)
-2. Consider: Pre-processing (auto-rotate, enhance) before Doc AI
-3. Or: Train custom Doc AI processor with 50+ samples
+### Telegram tidak menerima notifikasi
 
-### Scenario: Duplicate Invoices Not Caught
-1. Verify composite key logic: vendor + invoice_number + date + amount
-2. Check for whitespace/case differences in source data
-3. Add normalization in n8n (trim, lower) before dedupe check
+1. Periksa credential Telegram di node.
+2. Periksa chat ID yang berasal dari environment.
+3. Pastikan recipient pernah mengirim `/start`.
+4. Jangan melakukan retry membabi buta jika status request tidak jelas; periksa execution dan chat Telegram terlebih dahulu.
 
----
+### Banyak `Low Confidence`
 
-## Scaling Considerations
+1. Ambil sampel gambar dan periksa blur, crop, rotasi, dan kontras.
+2. Bandingkan OCR text dengan field normalisasi.
+3. Koreksi manual sesuai SOP.
+4. Pertimbangkan preprocessing gambar atau provider OCR khusus sebagai fase berikutnya.
 
-| Metric | Current | Threshold | Action |
-|--------|---------|-----------|--------|
-| Invoices/month | ~120 | > 500 | Add PostgreSQL for business data, keep Sheets for UI |
-| Concurrent approvals | < 5 | > 20 | Increase n8n workers, Redis memory |
-| Doc AI pages/month | ~180 | > 1,000 | Monitor cost, consider custom processor |
-| Sheets rows | ~1,400/yr | > 50,000 | Archive yearly, consider BigQuery |
+### Duplicate tidak sesuai harapan
 
----
+Composite key saat ini adalah:
 
-## Log Locations
-
-| Component | Location |
-|-----------|----------|
-| n8n Main | `docker-compose logs n8n` |
-| n8n Worker | `docker-compose logs n8n-worker` |
-| PostgreSQL | `docker-compose logs postgres` |
-| Redis | `docker-compose logs redis` |
-| n8n Internal | n8n UI → Executions (stored in PostgreSQL) |
-
----
-
-## Useful Commands
-
-```bash
-# Restart single service
-docker-compose restart n8n
-
-# Rebuild after config change
-docker-compose up -d --build n8n
-
-# View real-time logs
-docker-compose logs -f n8n
-
-# Execute command in container
-docker-compose exec n8n sh
-
-# PostgreSQL shell
-docker-compose exec postgres psql -U n8n -d n8n
-
-# Redis CLI
-docker-compose exec redis redis-cli
-
-# Clean up (WARNING: destroys data)
-docker-compose down -v
+```text
+vendor + invoice_number + invoice_date + amount
 ```
+
+Nilai di-trim dan diubah ke lowercase sebelum dibandingkan. Perbedaan format tanggal atau nominal yang semantik tetapi teksnya berbeda masih dapat lolos.
+
+## Backup dan Secret Rotation
+
+- Backup PostgreSQL volume secara berkala; database ini berisi metadata/execution n8n.
+- Export/backup spreadsheet Google sesuai kebijakan organisasi.
+- Jangan mencetak token pada log atau dokumentasi.
+- Rotasi token DeepSeek, Telegram, OAuth, dan HMAC sesuai kebijakan organisasi.
+- Setelah rotasi credential, jalankan smoke test satu invoice dummy.
+
+## Update Workflow
+
+1. Simpan perubahan pada file JSON sumber.
+2. Jalankan `pytest -q`.
+3. Import sebagai workflow baru atau replace dengan prosedur yang mencegah duplicate.
+4. Bind ulang credential jika ID credential berubah.
+5. Nonaktifkan workflow lama.
+6. Restart n8n bila perubahan aktivasi belum terlihat.
+7. Verifikasi health, active state, dan satu smoke test.
+
+## Cleanup Development
+
+Jangan menjalankan `docker compose down -v` pada runtime yang berisi data penting. Perintah tersebut dapat menghapus volume PostgreSQL, Redis, dan n8n.

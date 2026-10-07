@@ -17,6 +17,12 @@ services:
       - N8N_PROTOCOL=http
       - WEBHOOK_URL=http://localhost:5679  # A4 fix: base URL, tanpa sufiks
       - GENERIC_TIMEZONE=Asia/Jakarta
+      - LOCAL_AI_BASE_URL=http://host.docker.internal:8765
+      - DEEPSEEK_API_URL=${DEEPSEEK_API_URL}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-flash}
+      - TELEGRAM_OWNER_CHAT_ID=${TELEGRAM_OWNER_CHAT_ID}
+      - TELEGRAM_ADMIN_CHAT_ID=${TELEGRAM_ADMIN_CHAT_ID}
       # Single mode (not queue)
       - N8N_MODE=regular
       - EXECUTIONS_MODE=regular
@@ -35,6 +41,8 @@ services:
       - n8n_data_single:/home/node/.n8n
       - ./credentials:/home/node/.gcp:ro
       - ./n8n-workflows:/home/node/workflows:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy

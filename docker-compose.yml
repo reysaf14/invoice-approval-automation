@@ -6,9 +6,9 @@ services:
     image: n8nio/n8n:1.74.0
     container_name: n8n-main
     restart: unless-stopped
-    # NOTE(A2): public port moved to n8n-webhook; main UI exposed on 5682
+    # NOTE(A2): public port moved to n8n-webhook; main UI exposed on 5680 for Google OAuth callback
     ports:
-      - "5682:5678"
+      - "5680:5678"
     environment:
       # Core
       - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
@@ -16,8 +16,17 @@ services:
       - N8N_HOST=${N8N_HOST}
       - N8N_PORT=5678
       - N8N_PROTOCOL=${N8N_PROTOCOL}
+      - N8N_EDITOR_BASE_URL=${N8N_EDITOR_BASE_URL}
       - WEBHOOK_URL=${WEBHOOK_URL}
       - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+      - GOOGLE_DRIVE_FOLDER_ID=${GOOGLE_DRIVE_FOLDER_ID}
+      - GOOGLE_SHEETS_SPREADSHEET_ID=${GOOGLE_SHEETS_SPREADSHEET_ID}
+      - LOCAL_AI_BASE_URL=${LOCAL_AI_BASE_URL}
+      - DEEPSEEK_API_URL=${DEEPSEEK_API_URL}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL}
+      - TELEGRAM_OWNER_CHAT_ID=${TELEGRAM_OWNER_CHAT_ID}
+      - TELEGRAM_ADMIN_CHAT_ID=${TELEGRAM_ADMIN_CHAT_ID}
       - N8N_MODE=queue
       - EXECUTIONS_MODE=queue
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
@@ -40,6 +49,8 @@ services:
       - n8n_data:/home/node/.n8n
       - ./credentials:/home/node/.gcp:ro  # Google Service Account key
       - ./n8n-workflows:/home/node/workflows:ro  # Workflow JSON files
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -66,8 +77,17 @@ services:
       - N8N_HOST=${N8N_HOST}
       - N8N_PORT=5678
       - N8N_PROTOCOL=${N8N_PROTOCOL}
+      - N8N_EDITOR_BASE_URL=${N8N_EDITOR_BASE_URL}
       - WEBHOOK_URL=${WEBHOOK_URL}
       - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+      - GOOGLE_DRIVE_FOLDER_ID=${GOOGLE_DRIVE_FOLDER_ID}
+      - GOOGLE_SHEETS_SPREADSHEET_ID=${GOOGLE_SHEETS_SPREADSHEET_ID}
+      - LOCAL_AI_BASE_URL=${LOCAL_AI_BASE_URL}
+      - DEEPSEEK_API_URL=${DEEPSEEK_API_URL}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL}
+      - TELEGRAM_OWNER_CHAT_ID=${TELEGRAM_OWNER_CHAT_ID}
+      - TELEGRAM_ADMIN_CHAT_ID=${TELEGRAM_ADMIN_CHAT_ID}
       - N8N_MODE=queue
       - EXECUTIONS_MODE=queue
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
@@ -90,7 +110,11 @@ services:
       - n8n_data:/home/node/.n8n
       - ./credentials:/home/node/.gcp:ro
       - ./n8n-workflows:/home/node/workflows:ro  # Workflow JSON files
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
+      n8n:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:
@@ -119,8 +143,17 @@ services:
       - N8N_HOST=${N8N_HOST}
       - N8N_PORT=5678
       - N8N_PROTOCOL=${N8N_PROTOCOL}
+      - N8N_EDITOR_BASE_URL=${N8N_EDITOR_BASE_URL}
       - WEBHOOK_URL=${WEBHOOK_URL}
       - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+      - GOOGLE_DRIVE_FOLDER_ID=${GOOGLE_DRIVE_FOLDER_ID}
+      - GOOGLE_SHEETS_SPREADSHEET_ID=${GOOGLE_SHEETS_SPREADSHEET_ID}
+      - LOCAL_AI_BASE_URL=${LOCAL_AI_BASE_URL}
+      - DEEPSEEK_API_URL=${DEEPSEEK_API_URL}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL}
+      - TELEGRAM_OWNER_CHAT_ID=${TELEGRAM_OWNER_CHAT_ID}
+      - TELEGRAM_ADMIN_CHAT_ID=${TELEGRAM_ADMIN_CHAT_ID}
       - N8N_MODE=queue
       - EXECUTIONS_MODE=queue
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
@@ -140,6 +173,8 @@ services:
       - NODE_OPTIONS=--dns-result-order=ipv4first
     volumes:
       - n8n_data:/home/node/.n8n
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy

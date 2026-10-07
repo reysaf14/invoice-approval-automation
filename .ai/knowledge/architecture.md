@@ -1,160 +1,138 @@
-# ARSITEKTUR TEKNIS - Invoice Approval Automation
+# Arsitektur Teknis - Invoice Approval Automation
 
-## 1. Pendekatan Utama
-- [x] n8n Orchestration (Self-hosted via Docker)
-- [ ] Custom Script (Python/Node)
-- [ ] Desktop App
-- [ ] Kombinasi
+**Versi:** 2 (aligned with repository and local runtime, 2026-10-07)
 
-**Alasan:** Flow linear dengan banyak integrasi SaaS (Gmail, Drive, Sheets, Telegram), volume rendah (~120/bln), butuh human-in-the-loop approval. n8n native integrations mengurangi custom code >80%, visual debugging, queue mode untuk reliability.
+## 1. Topologi Runtime
 
-## 2. Aliran Data (Data Flow)
+```text
+Browser
+  │
+  └── n8n-main :5680  (UI, editor, OAuth callback, scheduler)
 
-```
-Sumber: 
-  ├─ Gmail (attachment PDF/JPG/PNG) → Gmail Trigger (poll 2 menit)
-  └─ Google Drive (folder "Invoices_Incoming") → Drive Trigger (poll 5 menit)
+Inbound approval caller
+  │
+  └── n8n-webhook :5678 (webhook process)
 
-Proses:
-  1. Download file → Generate UUID → Determine MIME
-  2. Google Document AI (Enterprise OCR) → Extract 4 fields + confidence
-  3. Validate confidence ≥ 0.85 → Flag "Low Confidence" jika gagal
-  4. Dedupe: Composite key (vendor + invoice_number + date + amount) vs Sheets
-  5. Write to Google Sheets (status: "Pending Approval")
-  6. Telegram Bot → Owner: formatted message + inline buttons (Approve/Reject)
-  7. Owner clicks → n8n Webhook (HMAC verified) → n8n Form Node
-  8. Form submit → Validate → Update Sheets (Approved/Rejected + audit fields)
-  9. Notify Admin (Telegram/Email) → "Ready for payment"
-  10. Scheduled workflow (cron 15min) → Reminders (1h, 4h, 12h) → Escalation (>24h)
-
-Tujuan:
-  ├─ Google Sheets (Master data + audit trail)
-  ├─ Telegram (Owner approval + Admin notifications + Reminders)
-  └─ Google Drive (File storage + preview links)
+n8n-main / n8n-webhook ── Redis 7 ── n8n-worker
+          │
+          └── PostgreSQL 16 (n8n metadata, credentials, executions)
 ```
 
-## 3. Struktur Folder
+Invoice business data is stored in Google Sheets. Original files remain in Google Drive. PostgreSQL is not the invoice master database.
 
-```
-invoice-approval-automation/
-├── .ai/
-│   ├── knowledge/
-│   │   ├── project-brief.md
-│   │   ├── prd.md
-│   │   └── architecture.md
-│   └── decisions/
-│       ├── ADR-001-orchestrator-n8n.md
-│       ├── ADR-002-ocr-google-doc-ai.md
-│       ├── ADR-003-approval-ui-n8n-form.md
-│       ├── ADR-004-database-google-sheets.md
-│       └── ADR-005-webhook-auth-hmac.md
-├── docker-compose.yml
-├── .env.template
-├── n8n-workflows/
-│   ├── 01-invoice-ingestion.json
-│   ├── 02-approval-handler.json
-│   └── 03-reminder-escalation.json
-├── src/
-│   └── (reserved for future custom services)
-├── tests/
-│   ├── test_ocr_extraction.py
-│   ├── test_dedupe_logic.py
-│   ├── test_sheets_schema.py
-│   └── test_webhook_auth.py
-└── docs/
-    ├── SETUP.md
-    ├── OPERATIONS.md
-    └── USER_GUIDE.md
+## 2. Implemented Data Flow
+
+```text
+Google Drive folder
+  → Google Drive Trigger (poll 5 min)
+  → JPG/JPEG/PNG filter
+  → Download File
+  → Build base64 image request
+  → DeepSeek vision request
+  → DeepSeek JSON normalization request
+  → Parse fields and confidence
+       ├─ < 0.85 → append Low Confidence row to Sheets
+       └─ >= 0.85 → read existing rows
+                    → composite-key dedupe
+                         ├─ duplicate → append Duplicate row
+                         └─ new → append Pending Approval row
+                                  → plain-text Telegram summary
 ```
 
-## 4. Dependency & Environment Variables
+The active OCR path is DeepSeek for both image OCR and normalization. The current workflow does not call the local-ai/Ollama service even though `LOCAL_AI_BASE_URL` remains in environment templates for compatibility.
 
-```bash
-# n8n Core
-N8N_BASIC_AUTH_USER=admin
-N8N_BASIC_AUTH_PASSWORD=***
-N8N_HOST=localhost
-N8N_PORT=5678
-N8N_PROTOCOL=http
-WEBHOOK_URL=http://localhost:5678/webhook
-GENERIC_TIMEZONE=Asia/Jakarta
-N8N_MODE=queue
-EXECUTIONS_MODE=queue
+## 3. Approval Flow
 
-# Database (PostgreSQL for n8n)
-DB_TYPE=postgresdb
-DB_POSTGRESDB=n8n
-DB_POSTGRESHOST=postgres
-DB_POSTGRESPORT=5432
-DB_POSTGRESUSER=n8n
-DB_POSTGRES_PASSWORD=***
-
-# Redis (Queue)
-REDIS_HOST=redis
-REDIS_PORT=6379
-
-# Google OAuth (Service Account recommended)
-GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=***
-GOOGLE_REDIRECT_URI=http://localhost:5678/oauth2/callback
-GOOGLE_SHEETS_SPREADSHEET_ID=1AbC...
-GOOGLE_DRIVE_FOLDER_ID=1XyZ...
-
-# Google Document AI
-GOOGLE_DOC_AI_PROJECT_ID=your-gcp-project
-GOOGLE_DOC_AI_LOCATION=asia-southeast1
-GOOGLE_DOC_AI_PROCESSOR_ID=your-ocr-processor-id
-GOOGLE_APPLICATION_CREDENTIALS=/home/node/.gcp/sa-key.json
-
-# Telegram
-TELEGRAM_BOT_TOKEN=***
-TELEGRAM_OWNER_CHAT_ID=123456789
-TELEGRAM_ADMIN_CHAT_ID=987654321
-
-# Webhook Security
-WEBHOOK_HMAC_SECRET=***  # 32-byte hex, generate: openssl rand -hex 32
-WEBHOOK_TIMESTAMP_TOLERANCE=300  # seconds
+```text
+Signed POST /webhook/approve
+  → HMAC-SHA256 + timestamp verification
+  → invoice lookup in Sheets
+  → status must be Pending Approval
+  → n8n Form: edit fields, Approve or Reject
+  → reject reason validation
+  → update Sheets
+  → Telegram admin notification + owner confirmation
 ```
 
-## 5. Database
+The owner-facing ingestion message does not currently include a Telegram inline button or deep link. A separate caller must invoke the signed endpoint to reach the form.
 
-- [ ] SQLite
-- [ ] PostgreSQL
-- [x] Tidak pakai database terpisah (Google Sheets sebagai data store utama)
+## 4. Reminder Flow
 
-**Catatan:** n8n internal menggunakan PostgreSQL (workflow, credentials, execution history). Data bisnis invoice 100% di Google Sheets.
+```text
+Schedule every 15 min
+  → read pending rows
+  → calculate age and reminder_count
+  → tier 1 / tier 2 / tier 3 owner reminder
+  → >24h admin escalation
+  → update reminder_count and last_reminder_at
+```
 
-## 6. Catatan Keamanan & Robustness (Desain Level)
+This workflow is present in source but is inactive in the last local runtime verification.
 
-- **Webhook Authentication**: Semua endpoint webhook (Telegram callback, Doc AI callback) WAJIB verifikasi HMAC-SHA256 signature + timestamp (ADR-005). Engineer implementasikan di Function node sebelum processing.
-- **Idempotency**: Dedupe by `invoice_id` (UUID) + composite key (vendor + invoice_number + date + amount) sebelum write Sheets. Approval handler check current status sebelum update (hindari double-approve).
-- **Secrets Management**: Semua secret di `.env` → Docker secrets / n8n Credentials (encrypted di PostgreSQL). JANGAN hardcode di workflow JSON.
-- **File Access Control**: Drive files: `anyone with link can view` HANYA untuk preview approval. Folder `Invoices_Incoming` restricted ke Admin/Owner service account.
-- **Rate Limiting**: n8n queue mode + Redis. Gmail/Drive API quota monitored (120 req/bln << quota). Doc AI: 1K pages/bln free tier.
-- **Audit Trail**: Setiap status change write `updated_at`, `approved_by`, `reject_reason`. Sheets version history sebagai backup audit.
-- **PII in Telegram**: Pesan hanya ringkasan (vendor, nominal, no invoice). Data lengkap di Sheets (access controlled). Callback data hanya `invoice_id|action`.
-- **Command Injection Prevention**: Jika n8n Execute Command node dipakai (tidak direncanakan), Engineer WAJIB avoid string interpolation dari data eksternal ke shell command.
-- **[QA-7/DEVOPS-TA] Webhook Registration Blocker — ROOT CAUSE CONFIRMED**: Properti `webhookId` harus berada di **level node**, bukan di dalam `parameters`. Jika salah posisi → n8n treat path sebagai dynamic → registrasi jatuh ke path ber-prefix `<workflowId>/webhook/<path>` → semua POST ke path polos 404. Stack production SEKARANG menggunakan 3 service n8n: `n8n` (UI, host 5682), `n8n-webhook` (public entrypoint, host 5678, command `webhook`), `n8n-worker` (command `worker`). Implementasi fix: Engineer wajib pindahkan `webhookId` di `02-approval-handler.json`. Track A dinonaktifkan; Track B dipertahankan sebagai kill-switch.
+## 5. Components
 
-## 7. Catatan Khusus
+| Component | Responsibility |
+|---|---|
+| n8n 1.74.0 | Orchestration and provider integration |
+| Google Drive | Input file storage and trigger source |
+| DeepSeek API | Multimodal OCR and structured field normalization |
+| Google Sheets | Invoice rows, statuses, confidence, and audit fields |
+| Telegram Bot API | Owner/admin summary notifications |
+| PostgreSQL 16 | n8n internal persistence |
+| Redis 7 | n8n queue transport |
+| Docker Compose | Reproducible local topology |
 
-- **n8n Queue Mode**: Wajib untuk production (main + worker). `EXECUTIONS_MODE=queue` + Redis.
-- **Google Doc AI Processor**: Buat di region `asia-southeast1` (Jakarta) untuk latency. Processor type: "Enterprise Document OCR".
-- **Telegram Bot**: Set webhook ke `WEBHOOK_URL/telegram` via `setWebhook` API. Inline keyboard buttons dengan `callback_data: "approve|uuid"` / `reject|uuid"`.
-- **Reminder Cron**: Workflow terpisah `03-reminder-escalation` jalan tiap 15 menit. Baca Sheets filter `status="Pending Approval" AND reminder_count < 3 AND created_at < now() - interval`.
-- **Approval Form URL**: n8n Form node generate URL unik per execution. Validasi `invoice_id` di form hidden field.
-- **Error Handling**: Setiap workflow punya Error Trigger → Telegram ke Admin + log ke Sheets tab `Errors`.
-- **[DEVOPS-TA] Topology Stack Final**: 3 service n8n untuk queue mode — `n8n` (UI/admin, host 5682), `n8n-webhook` (public entrypoint `command: webhook`, host 5678), `n8n-worker` (`command: worker`). Main UI BUKAN public edge lagi.
-- **[DEVOPS-TA] Race Migration Fix**: `depends_on` worker harus `n8n: condition: service_healthy` (worker tidak menjalankan migrasi sebelum main sehat). DevOps sudah menyiapkan patch, menunggu Engineer apply di compose file.
-- **[DEVOPS-TA] env key fix**: `DB_POSTGRESDB` → `DB_POSTGRESDB_DATABASE` (sudah dikoreksi di `.env.template`). `WEBHOOK_URL` tanpa sufiks `/webhook` (sudah dikoreksi).
-- **[QA-7] Track A (Root Cause Isolation)**: **COMPLETED** — H1 (DB split-brain) & H2 (queue mode tanpa webhook processor) keduanya **DISKONFIRMASI**. Akar masalah: malformed workflow JSON (`webhookId` dalam `parameters`). Detail di DEVOPS_REPORT_TRACK_A.md.
-- **[QA-7] Track B (Fallback Polling)**: **DIPEPERTAHANKAN sebagai kill-switch** meski webhook sudah fixed. Jika webhook regresi di masa depan → flip env `APPROVAL_MODE=polling` tanpa perlu deploy ulang.
-- **Backup**: PostgreSQL dump harian (cron di host). Sheets: manual export mingguan / Google Drive backup.
+## 6. Security Boundaries
 
-## 8. Riwayat Perubahan
+- Provider tokens are supplied through n8n credentials or environment variables; they are not part of workflow code.
+- Approval requests require `x-signature` and `x-timestamp` headers.
+- HMAC uses canonical sorted-key JSON, a timestamp tolerance, and constant-time comparison.
+- Telegram receives a small invoice summary, not the original file or complete OCR text.
+- Google Drive and Sheets access remains controlled by the connected Google account.
 
-| Versi | Tanggal | Perubahan | ADR Terkait |
-|-------|---------|-----------|-------------|
-| v1 | 2026-08-12 | Desain awal | ADR-001, ADR-002, ADR-003, ADR-004, ADR-005 |
-| v2 | 2026-08-25 | Respons QA REGRESSION #7: catat webhook blocker + dual-track plan (root-cause isolation & polling fallback) | ADR-006 |
-| v3 | 2026-08-25 | Track A SELESAI: root cause = `webhookId` salah posisi di workflow JSON. Stack updated ke 3-service topology (n8n + n8n-webhook + n8n-worker). Track B dipertahankan sebagai kill-switch. | ADR-006 |
+## 7. Trade-offs
+
+### DeepSeek for both OCR and normalization
+
+Using one multimodal provider reduces the number of provider integrations and keeps the prompt/JSON contract in one workflow. The trade-off is provider dependency, variable vision accuracy, and the need for a manual low-confidence path.
+
+### Google Sheets as the business store
+
+Sheets is familiar and easy for a small finance team to inspect. It does not provide transactional writes, strong concurrency control, or database-grade querying. A relational store becomes more appropriate as volume or workflow concurrency grows.
+
+### n8n Form for approval
+
+The form avoids deploying a separate web application. It is sufficient for an MVP decision form, but it does not provide a polished invoice preview or a native Telegram approval interaction.
+
+### Queue mode
+
+The main/webhook/worker split isolates inbound work from background execution and matches the intended n8n topology. For a small local workload it is more infrastructure than a single process requires.
+
+## 8. Environment Contract
+
+Important variables include:
+
+```text
+N8N_EDITOR_BASE_URL=http://localhost:5680
+WEBHOOK_URL=http://localhost:5678
+GOOGLE_SHEETS_SPREADSHEET_ID=...
+GOOGLE_DRIVE_FOLDER_ID=...
+DEEPSEEK_API_URL=https://api.deepseek.com/chat/completions
+DEEPSEEK_API_KEY=...
+DEEPSEEK_MODEL=...
+TELEGRAM_OWNER_CHAT_ID=...
+TELEGRAM_ADMIN_CHAT_ID=...
+WEBHOOK_HMAC_SECRET=...
+WEBHOOK_TIMESTAMP_TOLERANCE=300
+```
+
+`LOCAL_AI_BASE_URL` is not part of the active OCR call graph.
+
+## 9. Future Extensions
+
+- Connect Telegram buttons/deep links to the signed approval endpoint.
+- Activate and validate reminder workflow in the target runtime.
+- Add preprocessing or a specialized OCR fallback.
+- Add PDF/WEBP conversion and Gmail/WhatsApp intake adapters.
+- Move business data to PostgreSQL or another transactional store when needed.
+- Add an approval UI with signed file preview and stronger role controls.

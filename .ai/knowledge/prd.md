@@ -1,79 +1,96 @@
 # PRD: Invoice Approval Automation
 
-## Latar Belakang
+**Status:** Implemented MVP baseline with explicit follow-up backlog
+**Reviewed:** 2026-10-07
 
-Owner bisnis mengalami bottleneck pada proses approval invoice karena Admin Keuangan harus mengekstrak data manual dari 15–30 invoice per minggu yang masuk via Gmail dan WhatsApp, mencatat ke Google Sheets, lalu chasing Owner berulang kali via WhatsApp untuk persetujuan. Keterlambatan approval menyebabkan pengiriman barang dari supplier tertunda. Sistem otomasi end-to-end dibutuhkan untuk menghilangkan proses manual, mempercepat siklus approval, dan memastikan pembayaran tepat waktu.
+## 1. Problem
 
-## User Stories
+Small finance teams often receive invoice images and manually copy vendor, date, invoice number, and amount into a spreadsheet before asking an owner to review them. The manual path is repetitive and makes duplicate detection, low-quality documents, and pending approvals difficult to manage.
 
-1. **Sebagai Admin Keuangan**, saya ingin invoice yang masuk ke Gmail atau Google Drive otomatis diekstrak datanya dan tercatat di Google Sheets, agar tidak perlu input manual dan menghindari kesalahan ketik.
-2. **Sebagai Admin Keuangan**, saya ingin sistem mendeteksi duplikat invoice (Vendor + Nomor Invoice + Tanggal + Nominal sama), agar tidak terjadi risiko double payment.
-3. **Sebagai Owner**, saya ingin menerima notifikasi Telegram berisi ringkasan invoice (Vendor, Tanggal, Nomor, Nominal) dengan tombol Approve/Reject sekali klik, agar bisa menyetujui pembayaran dari mana saja tanpa buka spreadsheet.
-4. **Sebagai Owner**, saya ingin melihat preview gambar invoice di halaman approval sebelum memutuskan, agar memastikan data yang diekstrak sesuai dengan dokumen asli.
-5. **Sebagai Owner**, saya ingin mendapat reminder otomatis jika belum approve setelah 1 jam, 4 jam, dan 12 jam, agar tidak lupa dan approval tidak tertunda lama.
-6. **Sebagai Owner**, saya ingin bisa menolak (Reject) invoice dengan alasan, dan Admin mendapat notifikasi penolakan tersebut, agar proses koreksi bisa segera dilakukan.
-7. **Sebagai Admin Keuangan**, saya ingin mendapat notifikasi real-time saat status invoice berubah menjadi Approved, agar bisa segera eksekusi pembayaran ke supplier.
-8. **Sebagai Admin Keuangan**, saya ingin bisa mengedit data invoice di Google Sheets jika hasil ekstraksi salah, dan sistem tetap melacak perubahan tersebut, agar koreksi data tidak menghilangkan audit trail.
+This repository implements a local automation baseline for that workflow. It does not prove a specific customer's volume, savings, accuracy, or payment-delay reduction.
 
-## Fitur Wajib (Must Have)
+## 2. Users
 
-1. **Penerimaan Invoice Multi-Sumber**  
-   Sistem menerima invoice dari Gmail (attachment PDF/gambar) dan folder Google Drive tertentu (upload manual/forward dari WhatsApp).
+- **Finance admin:** places source files in Drive, monitors the invoice sheet, handles low-confidence and duplicate cases, and executes approved payments under the organization's own SOP.
+- **Owner/approver:** receives a Telegram summary and makes an approval decision through the signed approval flow when a caller/integration invokes it.
+- **Technical operator:** maintains n8n, credentials, provider configuration, queues, and execution history.
 
-2. **Ekstraksi Data Otomatis (OCR/AI)**  
-   Ekstrak 4 field wajib: Nama Vendor, Tanggal Invoice, Nomor Invoice, Total Nominal. Hasil ekstraksi disertai confidence score per field.
+## 3. Current Scope
 
-3. **Pencatatan Otomatis ke Google Sheets**  
-   Setiap invoice valid tercatat sebagai baris baru dengan kolom: Timestamp Masuk, Vendor, Tanggal, No. Invoice, Nominal, Status (Pending/Approved/Rejected), Approved At, Approved By, Confidence Score, Link File Sumber.
+### Implemented
 
-4. **Deduplikasi Invoice**  
-   Cek duplikat berdasarkan kombinasi: Vendor + Nomor Invoice + Tanggal + Nominal. Invoice duplikat di-flag (status "Duplicate") dan tidak membuat baris baru, tetap tercatat di log.
+1. Google Drive folder trigger with five-minute polling.
+2. JPG/JPEG/PNG file filter.
+3. DeepSeek vision OCR and second-pass JSON normalization.
+4. Vendor, invoice date, invoice number, amount, and confidence extraction.
+5. Confidence routing at `0.85`.
+6. Google Sheets write path for normal, duplicate, and low-confidence rows.
+7. Composite-key deduplication using vendor, invoice number, date, and amount.
+8. Plain-text Telegram owner notification for a new accepted invoice.
+9. HMAC-protected approval webhook, status guard, n8n form, Sheets update, and result notifications.
+10. Separate reminder/escalation workflow definition.
 
-5. **Notifikasi Approval ke Telegram Owner**  
-   Kirim pesan terstruktur berisi ringkasan invoice + tombol **Approve** / **Reject**. Payload callback tidak mengandung data sensitif lengkap.
+### Partial or Runtime-Dependent
 
-6. **Halaman Approval Web (Preview + Aksi)**  
-   Tombol Telegram mengarah ke halaman aman yang menampilkan: preview gambar/PDF invoice, data terisi (editable oleh Owner sebelum approve), tombol Approve/Reject dengan field alasan reject (wajib jika Reject).
+- The approval workflow is available, but the new-invoice Telegram message does not yet carry an approval button/deep link.
+- Reminder/escalation is implemented in source but may be inactive in a given runtime.
+- Google, DeepSeek, and Telegram integrations require valid credentials and external service availability.
 
-7. **Update Status Real-time ke Google Sheets**  
-   Saat Owner klik Approve: status → Approved, kolom Approved At diisi timestamp, Approved By diisi identitas Owner. Saat Reject: status → Rejected, alasan tertulis di kolom Catatan/Reject Reason.
+### Out of Scope / Backlog
 
-8. **Notifikasi ke Admin saat Approved**  
-   Admin menerima notifikasi (Telegram/Email) berisi detail invoice yang sudah disetujui, siap untuk eksekusi pembayaran.
+- Gmail or WhatsApp Business API ingestion.
+- Direct PDF/WEBP ingestion in the active file filter.
+- Embedded invoice preview in the form.
+- Payment execution in an ERP/accounting platform.
+- Multi-level approval, vendor whitelist, dashboard, and advanced reporting.
+- Production SLO, accuracy, or cost commitments.
 
-9. **Reminder & Escalation Otomatis**  
-   Reminder ke Owner: 1 jam, 4 jam, 12 jam setelah notifikasi pertama. Jika > 24 jam belum di-approve, escalation notifikasi ke Admin.
+## 4. Functional Requirements and Acceptance
 
-10. **Audit Trail Perubahan**  
-    Setiap perubahan status (Pending→Approved, Pending→Rejected, edit manual di Sheets) tercatat dengan timestamp, actor, dan nilai sebelum/sesudah.
+| Requirement | Current acceptance condition | Status |
+|---|---|---|
+| Drive intake | New JPG/JPEG/PNG in configured folder reaches workflow | Implemented |
+| AI extraction | DeepSeek returns OCR text and normalized JSON | Implemented, provider-dependent |
+| Confidence routing | `< 0.85` becomes `Low Confidence`; `>= 0.85` continues | Implemented |
+| Duplicate detection | Matching normalized composite key is written as `Duplicate` | Implemented |
+| Invoice storage | New accepted invoice is appended to configured Sheet | Implemented |
+| Owner notification | Plain-text summary is sent through Telegram credential | Implemented |
+| Approval | Signed `POST /webhook/approve` can open form and update status | Implemented in workflow |
+| Reminder | 1h/4h/12h tiers and >24h escalation exist in source | Runtime activation required |
+| Auditability | Status/actor/time/reason fields are carried in the Sheet row | Partial; Sheets history is the supporting audit layer |
 
-## Fitur Tambahan (Nice to Have)
+## 5. Data Contract
 
-1. **Dashboard Ringkasan Mingguan/Bulanan** — Rekap jumlah invoice, total nominal, rata-rata waktu approval, aging invoice pending.
-2. **Klasifikasi Otomatis Kategori Pengeluaran** — Berdasarkan nama vendor atau deskripsi invoice (mis. Restock, Operasional, Marketing).
-3. **Integrasi Kalender** — Otomatis buat event "Jatuh Tempo Pembayaran" di Google Calendar Owner/Admin berdasarkan tanggal invoice + terms.
-4. **Export Laporan ke PDF/Excel** — Untuk keperluan audit/internal review bulanan.
-5. **Whitelist/Blacklist Vendor** — Approve otomatis untuk vendor tepercaya (bypass approval), flag vendor bermasalah.
+The business row fields are:
 
-## Kriteria Sukses
+```text
+invoice_id, received_at, vendor, invoice_date, invoice_number, amount,
+status, confidence, drive_file_id, drive_file_link, source, approved_at,
+approved_by, rejected_at, reject_reason, reminder_count, last_reminder_at,
+created_at, updated_at
+```
 
-| Metric | Target |
-|--------|--------|
-| Waktu ekstrak data invoice → masuk Google Sheets | < 2 menit setelah invoice diterima |
-| Waktu Owner approve via Telegram → status update di Sheets | < 10 detik |
-| Akurasi ekstraksi data (Vendor, Tanggal, No. Invoice, Nominal) | ≥ 95% |
-| Admin tidak perlu chasing Owner via WhatsApp | 0 kali per minggu |
-| Invoice yang terlewat/tidak terekam | 0 per bulan |
-| Duplicate invoice terdeteksi & di-flag | 100% |
-| Reminder terkirim tepat waktu (1j, 4j, 12j) | 100% |
-| Uptime sistem penerimaan & notifikasi | ≥ 99.5% |
+Allowed operational statuses include `Pending Approval`, `Approved`, `Rejected`, `Duplicate`, `Low Confidence`, and `Failed`.
 
-## Riwayat Revisi
+## 6. Non-Functional Considerations
 
-| Versi | Tanggal | Perubahan | Diminta oleh |
-|-------|---------|-----------|--------------|
-| v1 | 2026-08-12 | Draft awal dari project brief | User |
+- Keep provider secrets in n8n credentials or local environment configuration.
+- Protect approval requests with HMAC-SHA256 and timestamp freshness checks.
+- Avoid sending the full invoice file or OCR body through Telegram.
+- Treat Google Sheets as a low-volume MVP data store, not a transactional ledger.
+- Keep source workflow JSON importable and testable without committing runtime secrets.
 
----
+## 7. Validation Evidence
 
-**Mohon review dan beri persetujuan (Approve) sebelum saya lanjutkan ke tahap desain teknis.**
+- Local Python/workflow regression suite: `42 passed` on 2026-10-07.
+- Local n8n health endpoint returned `ok`.
+- Last runtime status: ingestion and approval active; reminder inactive.
+
+These are local validation facts, not production acceptance or business outcome metrics.
+
+## 8. Revision History
+
+| Version | Date | Change |
+|---|---|---|
+| v1 | 2026-08-12 | Initial business requirements draft |
+| v2 | 2026-10-07 | Aligned requirements with implemented Drive → DeepSeek → Sheets → Telegram path; separated partial and planned capabilities |

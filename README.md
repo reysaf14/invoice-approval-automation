@@ -1,286 +1,118 @@
-# 📄 Invoice Approval Automation
+# Invoice Approval Automation
 
-> An [n8n](https://n8n.io)-based invoice approval system that removes the manual work of extracting invoice data, logging it to a spreadsheet, and chasing approvals over WhatsApp. Invoice arrives → automatic OCR → Google Sheets → Telegram → Owner approves/rejects → Admin executes payment.
+An n8n-based invoice processing MVP that reads invoice images from Google Drive, uses DeepSeek multimodal extraction, records normalized data in Google Sheets, and sends a concise Telegram notification for follow-up.
 
----
+> Status: **Local portfolio/demo MVP**. The scope below reflects the workflow source and the local runtime verified on 7 October 2026. It does not claim production business results.
 
-## Overview
+## Business Outcome Intended
 
-| | |
-|---|---|
-| **Design volume** | ~120 invoices/month (~4-6/day) |
-| **Workflow types** | Event-driven (Gmail/Drive triggers), Webhook (Telegram callback), Cron (15-min reminders) |
-| **Data store** | Google Sheets (business master) + PostgreSQL (n8n metadata) |
-| **OCR** | Google Document AI — Enterprise OCR, region `asia-southeast1` |
-| **Notifications** | Telegram (Owner approval + Admin alerts + reminders/escalation) |
-| **Webhook security** | HMAC-SHA256 + anti-replay timestamp + `timingSafeEqual` |
-| **Testing** | 35 unit tests (pytest), 0 failures |
+The workflow removes repetitive copying of vendor, date, invoice number, and amount from image invoices. It routes uncertain OCR results to a manual-review queue, records duplicate candidates, and keeps invoice status visible in Google Sheets.
 
----
+No time savings, accuracy, volume, revenue, or client results are claimed. Those metrics require measurement against real operational data.
+
+## Current Data Flow
+
+```text
+Google Drive folder (JPG/JPEG/PNG)
+        │ every 5 minutes
+        ▼
+Download file
+        ▼
+DeepSeek Vision: image → OCR text
+        ▼
+DeepSeek JSON normalization: vendor, date, number, amount, confidence
+        │
+        ├─ confidence < 0.85 → Google Sheets: Low Confidence; no owner notification
+        │
+        └─ confidence >= 0.85
+             ├─ composite key matches an existing row → Duplicate
+             └─ new invoice → Pending Approval → plain-text Telegram summary
+```
+
+The approval workflow exposes `POST /webhook/approve`, validates HMAC-SHA256 signatures and timestamps, checks the current invoice status, opens an n8n form, updates Google Sheets, and sends result notifications. The reminder workflow is present in source but was inactive in the last local runtime verification.
+
+## Capability Status
+
+| Capability | Status | Evidence / boundary |
+|---|---|---|
+| Google Drive folder trigger | Implemented | Five-minute polling; JPG/JPEG/PNG filter |
+| OCR and field normalization | Implemented | DeepSeek vision request followed by DeepSeek JSON request |
+| Confidence threshold | Implemented | `0.85`; lower results become `Low Confidence` rows |
+| Deduplication | Implemented | Vendor + invoice number + date + amount after trim/lowercase normalization |
+| Google Sheets recording | Implemented | Invoice and audit fields are written to the configured sheet |
+| New-invoice Telegram notification | Implemented | Plain text; no emoji, Markdown, or placeholder file link |
+| Approval endpoint and HMAC | Implemented in workflow | Requires a signed caller with timestamp headers |
+| Telegram approve/reject buttons | Not connected | The current invoice message is notification-only |
+| n8n approval form | Implemented in workflow | Reached after a valid approval request |
+| Reminder/escalation | Implemented in source | Inactive in the last local runtime; activate deliberately |
+| Gmail, WhatsApp API, PDF, WEBP input | Not in active path | Files must reach Drive as JPG/JPEG/PNG first |
 
 ## Architecture
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                        INPUT SOURCES                                     │
-│   ┌──────────┐        ┌───────────────────┐                             │
-│   │  Gmail   │        │   Google Drive     │                             │
-│   │ (poll 2m)│        │   (poll 5m)        │                             │
-│   └────┬─────┘        └────────┬──────────┘                             │
-│        │                       │                                         │
-│        └───────────┬───────────┘                                         │
-│                    ▼                                                     │
-│   ┌────────────────────────────────────────────────┐                     │
-│   │  WORKFLOW 01 — Invoice Ingestion               │                     │
-│   │  19 nodes: download → Doc AI OCR → parse        │                     │
-│   │  → confidence check → dedupe → write Sheets     │                     │
-│   │  → notify Owner via Telegram                   │                     │
-│   └───────────────────┬────────────────────────────┘                     │
-│                       │                                                  │
-│   ┌───────────────────┼────────────────────────────┐                     │
-│   │                   ▼                            │                     │
-│   │  Telegram ←── Owner clicks [Approve]/[Reject] │                     │
-│   │                   │                            │                     │
-│   │  WORKFLOW 02 — Approval Handler  (19 nodes)   │                     │
-│   │  POST /webhook/approve → HMAC verify           │                     │
-│   │  → lookup Sheets → n8n Form → update status    │                     │
-│   │  → notify Admin + confirm to Owner             │                     │
-│   └────────────────────────────────────────────────┘                     │
-│                                                                          │
-│   ┌────────────────────────────────────────────────┐                     │
-│   │  WORKFLOW 03 — Reminder & Escalation (12 nodes)│                     │
-│   │  Cron 15m → read pending → aging check:        │                     │
-│   │  1h reminder → 4h reminder → 12h reminder     │                     │
-│   │  → >24h escalation to Admin                   │                     │
-│   └────────────────────────────────────────────────┘                     │
-└──────────────────────────────────────────────────────────────────────────┘
+- **Orchestrator:** self-hosted n8n 1.74.0 in Docker Compose queue mode.
+- **Main/UI:** `http://localhost:5680`.
+- **Webhook edge:** `http://localhost:5678`.
+- **Worker:** separate n8n queue worker.
+- **n8n metadata:** PostgreSQL 16.
+- **Queue:** Redis 7.
+- **AI:** DeepSeek chat-completions-compatible API. The active workflow sends an image as a base64 `image_url`, then sends OCR text to a second JSON-normalization request.
+- **Business store:** Google Sheets.
+- **File store:** Google Drive.
+- **Notifications:** Telegram Bot API through n8n credentials.
+- **Approval security:** HMAC-SHA256, timestamp freshness, and constant-time comparison.
 
-Stack (Docker Compose):
-┌──────────────────────────────────────────────────┐
-│  n8n-main (UI :5682)  n8n-webhook (:5678)  n8n-worker │
-│  PostgreSQL 16        Redis 7                        │
-└──────────────────────────────────────────────────┘
-```
+## Repository Layout
 
----
-
-## Tech Stack
-
-| Component | Technology | Rationale (→ [ADR](.ai/decisions/)) |
-|---|---|---|
-| Orchestrator | n8n 1.74.0 (self-hosted, Docker) | [ADR-001](.ai/decisions/ADR-001-orchestrator-n8n.md) — visual, 400+ integrations, Google native |
-| OCR | Google Document AI | [ADR-002](.ai/decisions/ADR-002-ocr-google-doc-ai.md) — free 1K pages/mo, accurate, native GCP |
-| Approval UI | n8n Form Node | [ADR-003](.ai/decisions/ADR-003-approval-ui-n8n-form.md) — zero deploy, MVP-first |
-| Data Store | Google Sheets | [ADR-004](.ai/decisions/ADR-004-database-google-sheets.md) — zero infra, Admin-friendly |
-| Webhook Auth | HMAC-SHA256 + timestamp | [ADR-005](.ai/decisions/ADR-005-webhook-auth-hmac.md) — integrity + anti-replay |
-| Runtime | n8n queue mode (main + webhook + worker) | [ADR-006](.ai/decisions/ADR-006-webhook-blocker-dual-track.md) — impl notes |
-| Infrastructure | Docker Compose, PostgreSQL, Redis | — |
-| Testing | pytest (Python) | 35 unit tests: dedupe, OCR parsing, Sheets schema, HMAC auth |
-
----
-
-## Quick Start
-
-### Prerequisites
-- Docker & Docker Compose v2.x
-- Google Cloud project (Sheets API, Drive API, Document AI)
-- Telegram bot ([@BotFather](https://t.me/BotFather))
-- Server/VM: min. 2 CPU, 4GB RAM, 20GB disk
-
-### Run
-
-```bash
-# 1. Clone
-git clone https://github.com/reysaf14/invoice-approval-automation.git
-cd invoice-approval-automation
-
-# 2. Configure
-cp .env.template .env
-# Edit .env — fill in all values (see .env.template for per-variable notes)
-
-# 3. Prepare credentials
-mkdir -p credentials
-# Copy your Google Service Account key to credentials/sa-key.json
-
-# 4. Start
-docker compose up -d
-
-# 5. Verify
-curl http://localhost:5678/healthz   # n8n-webhook
-curl http://localhost:5682/healthz   # n8n-main (UI)
-
-# 6. Set up n8n
-# Open http://localhost:5682 → Login
-# Import workflows 01, 02, 03 from n8n-workflows/
-# Set up credentials (Google OAuth, Telegram, Doc AI)
-# Activate workflows via the UI toggle
-
-# 7. Set Telegram webhook
-curl -X POST "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" \
-  -d "url=https://<DOMAIN>/webhook/telegram"
-```
-
-> 📖 **Full guide:** [docs/SETUP.md](docs/SETUP.md) | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | [docs/OPERATIONS.md](docs/OPERATIONS.md)
-
----
-
-## Repository Structure
-
-```
+```text
 invoice-approval-automation/
-├── .ai/                          # Architecture & technical decisions
-│   ├── knowledge/
-│   │   ├── prd.md                # Product Requirements Document
-│   │   ├── architecture.md       # Architecture design (data flow, stack, infra)
-│   │   └── project-brief.md      # Initial project summary
-│   ├── decisions/                # Architecture Decision Records
-│   │   ├── ADR-001-orchestrator-n8n.md
-│   │   ├── ADR-002-ocr-google-doc-ai.md
-│   │   ├── ADR-003-approval-ui-n8n-form.md
-│   │   ├── ADR-004-database-google-sheets.md
-│   │   ├── ADR-005-webhook-auth-hmac.md
-│   │   └── ADR-006-webhook-blocker-dual-track.md
-│   └── implementation/
-│       └── IMPLEMENTATION_PLAN.md
-├── n8n-workflows/                # Workflow JSON (import directly into n8n)
-│   ├── 01-invoice-ingestion.json      # 19 nodes — trigger, OCR, dedupe, notify
-│   ├── 02-approval-handler.json       # 19 nodes — webhook, HMAC, form, update
-│   ├── 03-reminder-escalation.json    # 12 nodes — cron, aging, reminder, escalation
-│   └── test-webhook-only.json         #  2 nodes — minimal webhook test
-├── src/helpers/                  # Logger helper (Python)
-├── scripts/
-│   ├── validate-env.sh           # Validates 27 required env vars
-│   └── test-telegram-bot.sh      # Quick Telegram bot connectivity test
-├── tests/                        # Unit tests (pytest)
-│   ├── test_dedupe_logic.py      # 10 tests — composite key dedupe
-│   ├── test_ocr_extraction.py    #  3 tests — OCR response parsing
-│   ├── test_sheets_schema.py     # 12 tests — Sheets column validation
-│   └── test_webhook_auth.py      #  9 tests — HMAC + timestamp + edge cases
-├── docker-compose.yml            # Production stack (queue mode)
-├── docker-compose.single.yml     # Dev/test stack (single mode)
-├── .env.template                 # Environment variables template
-└── docs/                         # Operational documentation
-    ├── SETUP.md                  # Full installation
-    ├── USER_GUIDE.md             # Owner & Admin guide
-    └── OPERATIONS.md             # Day-to-day operations
+├── n8n-workflows/              # importable n8n workflow JSON
+├── .ai/                        # PRD, architecture, ADRs, implementation status
+├── docs/                       # setup, user, operations, current status
+├── tests/                      # pytest regression suite
+├── docker-compose.yml          # queue-mode stack
+├── docker-compose.single.yml   # single-mode test stack
+└── .env.template
 ```
 
----
+## Local Setup
 
-## Testing
+1. Copy `.env.template` to `.env` and fill secrets locally.
+2. Create/connect Google Drive, Google Sheets, and Telegram credentials in n8n.
+3. Set `DEEPSEEK_API_URL`, `DEEPSEEK_API_KEY`, and `DEEPSEEK_MODEL`. The active path does not call local-ai/Ollama.
+4. Run `docker compose up -d`.
+5. Open `http://localhost:5680`, import the workflows, bind credentials, and activate only the workflows you intend to run.
+6. Upload a JPG/JPEG/PNG invoice to the configured Drive folder.
+7. Inspect Sheets, n8n executions, and the owner Telegram chat.
 
-```bash
-python -m pytest tests/ -v
+See [docs/SETUP.md](docs/SETUP.md), [docs/USER_GUIDE.md](docs/USER_GUIDE.md), [docs/OPERATIONS.md](docs/OPERATIONS.md), and [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md).
+
+## Tests
+
+```powershell
+pytest -q
 ```
 
-```
-tests/test_dedupe_logic.py     10 passed
-tests/test_ocr_extraction.py    3 passed
-tests/test_sheets_schema.py    12 passed
-tests/test_webhook_auth.py      9 passed
-────────────────────────────────────────
-35 passed in 0.10s
-```
+The latest local regression run passed **42 tests** covering deduplication, OCR parsing, Sheets schema, HMAC verification, workflow contracts, and notification formatting. This does not replace provider-level acceptance testing with the target Google, DeepSeek, and Telegram accounts.
 
-### What is tested
+## Known Limitations
 
-| Module | Focus | Critical cases |
-|---|---|---|
-| `test_dedupe_logic.py` | Composite-key deduplication | case-insensitive, whitespace trim, duplicate detection, edge cases |
-| `test_ocr_extraction.py` | OCR response parsing | field extraction, missing fields, amount formatting |
-| `test_sheets_schema.py` | Google Sheets column structure | 19 valid columns, data types, status enum, referential |
-| `test_webhook_auth.py` | HMAC-SHA256 webhook auth | valid signature, tamper detection, timestamp expiry/replay, timing-safe comparison, unicode handling |
+- Google Sheets is not a transactional database; concurrent writes and row growth need monitoring.
+- DeepSeek is a provider dependency for both vision OCR and normalization; quota, latency, and output behavior can change.
+- Blurry or cropped images can produce low confidence or missing fields.
+- The active path does not directly ingest Gmail or WhatsApp, and it does not accept PDF/WEBP without an upstream conversion step.
+- The new-invoice message intentionally has no file link or approval buttons. The signed approval endpoint and form exist, but the Telegram button/deep-link integration is not connected.
+- The reminder workflow is present but must be activated and tested in the target runtime.
+- PostgreSQL and Redis support n8n internals; invoice business data remains in Google Sheets.
 
----
+## Security Notes
 
-## Known Limitations (Honest)
+- Never commit `.env`, Google credentials, or Telegram tokens.
+- Keep provider secrets in the n8n Credential Store.
+- Use a strong HMAC secret and a bounded timestamp tolerance for approval requests.
+- Telegram receives a summary only; the source file remains in Google Drive.
 
-This section is **intentional**. A system claiming to be perfect for 120 invoices/month would deserve skepticism.
-
-| Limitation | Why | Improvement path |
-|---|---|---|
-| **Google Sheets as primary data store** | No transactions, O(n) dedupe per new invoice, race conditions on concurrent updates | → PostgreSQL when volume > 500/month (see ADR-004) |
-| **Approval UI uses n8n Form Node** | No PDF/image preview of the invoice on the approval page | → Custom web app (Cloud Run + signed Drive URL) |
-| **Queue-mode 3-service for 120 invoices/month** | Over-provisioned — 5 containers (n8n×3, Postgres, Redis) for ~4-6 heavy executions/day | → Single mode is sufficient for MVP; queue mode helps at ≥100 files/day bursts |
-| **No auto-approval** | Every invoice passes through the Owner, even for trusted vendors with small amounts | → Vendor whitelist + threshold (PRD nice-to-have #5) |
-| **Limited OCR free tier** | Google Document AI: 1,000 pages/month (first 3 months) | → Gemini Flash as a fallback, or batching + file-hash cache |
-
----
-
-## Debugging Saga: The Webhook 404
-
-One of the biggest technical challenges in this project was a **webhook that never received requests** — every POST returned 404 even though the workflow was active.
-
-### Timeline
-
-| Stage | Finding | Status |
-|---|---|---|
-| QA #1–#6 | Iterated various webhook configs, tested across multiple n8n versions | ❌ Webhook still 404 |
-| QA #7 | Hypotheses: DB split-brain or queue mode without a webhook processor | ❓ Unresolved |
-| **DevOps Track A** | Reproduced in an isolated single-DB rig — DB split-brain disproved | ❌ H1 wrong |
-| **DevOps Track B** | Polling fallback prepared as a kill-switch | ✅ Fallback ready |
-| **Engineer** | Found: **`webhookId` was placed INSIDE `parameters`** — it belongs at **node level** | ✅ Root cause |
-| **QA #8** | Retest: `webhook_entity` 0→3+ rows, POST → 200, execution success | ✅ PASS |
-
-### Root cause
-
-```json
-// ❌ WRONG — webhookId inside parameters
-{ "parameters": { "path": "approve", "webhookId": "..." } }
-
-// ✅ CORRECT — webhookId at node level (sibling of parameters)
-{ "parameters": { "path": "approve" }, "webhookId": "..." }
-```
-
-Consequence: n8n registered the webhook under a dynamic path `<workflowId>/webhook/<path>` → POST to the bare path → 404.
-
-> 📖 **Full reports:** [docs/QA_REPORT_REGRESSION_7.md](docs/QA_REPORT_REGRESSION_7.md) | [docs/QA_REPORT_REGRESSION_8.md](docs/QA_REPORT_REGRESSION_8.md) | [docs/FIX_REPORT.md](docs/FIX_REPORT.md)
-
----
-
-## Architecture Decision Records
-
-| ADR | Title | Key Trade-off |
-|---|---|---|
-| [ADR-001](.ai/decisions/ADR-001-orchestrator-n8n.md) | Orchestrator: n8n self-hosted | Visual + native integrations vs extra infra (Postgres + Redis) |
-| [ADR-002](.ai/decisions/ADR-002-ocr-google-doc-ai.md) | OCR: Google Document AI | Free 1K pages/mo, native GCP vs Gemini Flash (more flexible) |
-| [ADR-003](.ai/decisions/ADR-003-approval-ui-n8n-form.md) | Approval UI: n8n Form Node | Zero deploy vs custom web app (PDF preview) |
-| [ADR-004](.ai/decisions/ADR-004-database-google-sheets.md) | Database: Google Sheets only | Zero infra vs PostgreSQL (transactions, referential integrity) |
-| [ADR-005](.ai/decisions/ADR-005-webhook-auth-hmac.md) | Webhook Auth: HMAC-SHA256 | Integrity + anti-replay vs IP whitelist (fragile) |
-| [ADR-006](.ai/decisions/ADR-006-webhook-blocker-dual-track.md) | Webhook Blocker: dual-track | Root cause isolation + polling fallback kill-switch |
-
----
-
-## Operational Cost (Estimate)
-
-| Component | Cost/month |
-|---|---|
-| Google Document AI | $0 (free tier) — after free tier: ~$0.27 |
-| Google Sheets + Drive | $0 (free) |
-| Telegram Bot API | $0 (free) |
-| Server/VPS | Provider-dependent |
-| **Total software cost** | **$0 — $0.27/month** |
-
----
-
-## Notes for Recruiters / Reviewers
-
-This project was built to explore:
-- **Event-driven architecture** with n8n (not just another CRUD app)
-- **Documented technical trade-offs** (6 ADRs)
-- **Systematic debugging** — 8 regression-testing cycles to isolate the root cause of a single misplaced JSON property
-- **Webhook security** — HMAC, anti-replay, timing-safe comparison
-- **Dedupe design** — composite key, case-insensitive, race-condition mitigation
-- **Operational AI** — Document AI OCR, confidence scoring, fallback for low-confidence results
-
-> Every technical decision comes with a **rationale** (not just "used X because it's popular"). See `.ai/decisions/` for full trade-off analysis.
-
----
+See `.ai/decisions/` for the rationale behind the main trade-offs.
 
 ## License
 
-Built as a learning project. Feel free to reference it for study.
-
----
-
-**Built with curiosity, documented with honesty.**
+Learning/portfolio project; not a claim of production deployment.

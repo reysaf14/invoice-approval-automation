@@ -17,8 +17,8 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1,
       "position": [
-        250,
-        400
+        0,
+        220
       ]
     },
     {
@@ -40,8 +40,8 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
       "position": [
-        480,
-        400
+        260,
+        220
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
@@ -59,8 +59,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        710,
-        400
+        520,
+        220
       ]
     },
     {
@@ -80,8 +80,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
       "position": [
-        940,
-        400
+        780,
+        220
       ]
     },
     {
@@ -93,8 +93,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1170,
-        400
+        1040,
+        220
       ]
     },
     {
@@ -106,8 +106,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1400,
-        340
+        1040,
+        500
       ]
     },
     {
@@ -119,8 +119,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1400,
-        520
+        1040,
+        700
       ]
     },
     {
@@ -136,13 +136,13 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
       "position": [
-        1630,
-        340
+        1300,
+        500
       ],
       "credentials": {
         "telegramApi": {
-          "id": "5",
-          "name": "Telegram Bot API"
+          "id": "8NjEduIbTMBL1yoi",
+          "name": "Telegram account"
         }
       }
     },
@@ -159,13 +159,13 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
       "position": [
-        1630,
-        520
+        1300,
+        700
       ],
       "credentials": {
         "telegramApi": {
-          "id": "5",
-          "name": "Telegram Bot API"
+          "id": "8NjEduIbTMBL1yoi",
+          "name": "Telegram account"
         }
       }
     },
@@ -192,8 +192,8 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
       "position": [
-        1860,
-        340
+        1560,
+        500
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
@@ -209,8 +209,8 @@
       "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
       "position": [
-        250,
-        700
+        0,
+        900
       ]
     },
     {
@@ -226,13 +226,13 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
       "position": [
-        500,
-        700
+        260,
+        900
       ],
       "credentials": {
         "telegramApi": {
-          "id": "5",
-          "name": "Telegram Bot API"
+          "id": "8NjEduIbTMBL1yoi",
+          "name": "Telegram account"
         }
       }
     }

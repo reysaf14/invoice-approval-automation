@@ -1,222 +1,155 @@
-# Setup Guide - Invoice Approval Automation
+# Setup Guide
 
-## Prerequisites
+Panduan ini menyiapkan demo lokal yang sesuai dengan workflow di repository. Secret asli hanya boleh disimpan di `.env` atau n8n Credential Store.
 
-### 1. Infrastructure
-- **Docker & Docker Compose** (v2.x)
-- **Server/VM** with: 2 CPU, 4GB RAM, 20GB disk (minimum)
-- **Domain** (optional, for production webhook URL) or use localhost/ngrok for development
+## Prasyarat
 
-### 2. Google Cloud Project
-- **GCP Project** with billing enabled
-- **APIs Enabled**:
-  - Google Sheets API
-  - Google Drive API
-  - Document AI API
-- **Service Account** with roles:
-  - `roles/editor` (or minimal: Sheets Editor, Drive File Admin, Document AI API User)
-  - Download JSON key → save as `credentials/sa-key.json`
+- Docker Desktop dan Docker Compose v2.
+- Google Cloud project dengan Google Drive API dan Google Sheets API.
+- Google OAuth client untuk n8n.
+- Spreadsheet dan folder Drive untuk invoice.
+- Telegram bot dan chat ID owner/admin.
+- DeepSeek API key dan model yang menerima image input.
 
-### 3. Google Document AI Processor
-1. Go to **Document AI** → **Processors** → **Create Processor**
-2. Type: **Enterprise Document OCR**
-3. Region: `asia-southeast1` (Jakarta) - recommended for latency
-4. Note: `PROJECT_ID`, `LOCATION`, `PROCESSOR_ID`
-5. **Free tier**: 1,000 pages/month for 3 months (new accounts)
+Jalur aktif tidak membutuhkan local-ai/Ollama. `LOCAL_AI_BASE_URL` yang ada di template environment adalah nilai kompatibilitas/legacy dan tidak dipanggil oleh workflow ingestion saat ini.
 
-### 4. Google OAuth Credentials (for n8n)
-1. **APIs & Services** → **Credentials** → **Create Credentials** → **OAuth Client ID**
-2. Type: **Web Application**
-3. Authorized redirect URIs:
-   - `http://localhost:5678/oauth2/callback` (dev)
-   - `https://your-domain.com/oauth2/callback` (prod)
-4. Note: `CLIENT_ID`, `CLIENT_SECRET`
+## 1. Environment
 
-### 5. Google Sheets & Drive Setup
-1. Create **Spreadsheet** for invoice master data
-2. Share with Service Account email (Editor)
-3. Note: `SPREADSHEET_ID` (from URL)
-4. Create **Drive Folder**: `Invoices_Incoming`
-5. Share with Service Account (Editor)
-6. Note: `FOLDER_ID` (from URL)
-
-### 6. Telegram Bot
-1. Message **@BotFather** → `/newbot`
-2. Note: `BOT_TOKEN`
-3. Get **Chat IDs**:
-   - Owner: Message bot → `@userinfobot` → forward to bot
-   - Admin: Same process
-4. Set webhook (after n8n running):
-   ```bash
-   curl -X POST "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" \
-     -d "url=https://your-domain.com/webhook/telegram"
-   ```
-
----
-
-## Installation Steps
-
-### 1. Clone & Configure
-```bash
-cd invoice-approval-automation
-cp .env.template .env
-# Edit .env with all values from prerequisites
+```powershell
+Copy-Item .env.template .env
 ```
 
-### 2. Prepare Credentials
-```bash
-mkdir -p credentials
-# Place Google Service Account key:
-cp /path/to/sa-key.json credentials/sa-key.json
-chmod 600 credentials/sa-key.json
+Isi sekurangnya:
+
+```text
+N8N_BASIC_AUTH_USER=...
+N8N_BASIC_AUTH_PASSWORD=...
+N8N_ENCRYPTION_KEY=...
+DB_POSTGRESDB_PASSWORD=...
+GOOGLE_SHEETS_SPREADSHEET_ID=...
+GOOGLE_DRIVE_FOLDER_ID=...
+DEEPSEEK_API_URL=https://api.deepseek.com/chat/completions
+DEEPSEEK_API_KEY=...
+DEEPSEEK_MODEL=...
+TELEGRAM_OWNER_CHAT_ID=...
+TELEGRAM_ADMIN_CHAT_ID=...
+WEBHOOK_HMAC_SECRET=...
+WEBHOOK_TIMESTAMP_TOLERANCE=300
 ```
 
-### 3. Generate Secrets
-```bash
-# HMAC secret for webhook auth
-openssl rand -hex 32
-# Add to .env as WEBHOOK_HMAC_SECRET
+`WEBHOOK_URL` untuk stack ini adalah base URL webhook, bukan URL dengan suffix `/webhook`. Contoh lokal: `http://localhost:5678`.
 
-# Strong passwords for n8n & PostgreSQL
-openssl rand -base64 24
-# Add to .env as N8N_BASIC_AUTH_PASSWORD, DB_POSTGRES_PASSWORD
+## 2. Google OAuth
+
+Di Google Cloud Console, tambahkan redirect URI berikut untuk credential OAuth n8n lokal:
+
+```text
+http://localhost:5680/rest/oauth2-credential/callback
 ```
 
-### 4. Start Services
-```bash
-# Development
-docker-compose up -d
+Kemudian:
 
-# Production (with domain)
-# Ensure .env has correct WEBHOOK_URL (https://your-domain.com/webhook)
-docker-compose -f docker-compose.yml up -d
+1. Buka `http://localhost:5680`.
+2. Buat atau edit credential Google Drive OAuth2.
+3. Masukkan client ID/secret dari Google Cloud.
+4. Hubungkan akun Google dummy atau akun kerja yang memang diberi izin.
+5. Ulangi untuk Google Sheets OAuth2 bila credential terpisah digunakan.
+
+Pastikan akun tersebut memiliki akses ke spreadsheet dan folder Drive target.
+
+## 3. Telegram Credential
+
+1. Buat bot melalui `@BotFather`.
+2. Simpan token hanya di n8n Credential Store.
+3. Kirim `/start` ke bot dari akun owner dan admin.
+4. Isi `TELEGRAM_OWNER_CHAT_ID` dan `TELEGRAM_ADMIN_CHAT_ID` di environment n8n.
+
+Workflow saat ini mengirim pesan Telegram melalui Bot API; tidak ada Telegram webhook atau Telegram inline-button approval yang menjadi trigger aktif.
+
+## 4. Start Docker Stack
+
+```powershell
+docker compose up -d
+docker compose ps
 ```
 
-### 5. Verify Services
-```bash
-# Check logs
-docker-compose logs -f n8n
+Port yang digunakan:
 
-# Health checks
-curl http://localhost:5678/healthz
-curl http://localhost:5678/webhook/health  # if you add a health endpoint
+| Service | Host port | Fungsi |
+|---|---:|---|
+| `n8n-main` | `5680` | UI, editor, OAuth callback |
+| `n8n-webhook` | `5678` | Public webhook entrypoint |
+| `n8n-worker` | - | Queue execution |
+| PostgreSQL | internal | Metadata dan execution n8n |
+| Redis | internal | Queue |
+
+Verifikasi:
+
+```powershell
+Invoke-RestMethod http://localhost:5680/healthz
+Invoke-RestMethod http://localhost:5678/healthz
 ```
 
-### 6. n8n Initial Setup
-1. Open `http://localhost:5678`
-2. Login with `N8N_BASIC_AUTH_USER` / `N8N_BASIC_AUTH_PASSWORD`
-3. **Credentials** → **New Credential** → Add:
-   - **Google OAuth2 API**: Use `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
-   - **Telegram API**: Use `TELEGRAM_BOT_TOKEN`
-   - **Header Auth** (for HMAC): Name `WEBHOOK_HMAC_SECRET`, Value from `.env`
-4. **Workflows** → **Import** → Load each workflow JSON:
-   - `n8n-workflows/01-invoice-ingestion.json`
-   - `n8n-workflows/02-approval-handler.json`
-   - `n8n-workflows/03-reminder-escalation.json`
-5. Configure each workflow's credentials (Google, Telegram, HMAC)
-6. **Activate** each workflow via toggle switch (top-right)
-7. Verify webhook registered:
-   - Open workflow 02 → click Webhook node → check "Production URL" is shown
-   - Test: `curl -X POST http://localhost:5678/webhook/approve` should return 401 (not 404)
+## 5. Import dan Aktivasi Workflow
 
-**⚠️ Import Dedup Warning**: n8n `import:workflow` does NOT auto-dedup. If you re-import, you will get **duplicate workflows**. To avoid this:
-- **Option A (recommended)**: Delete old workflow from n8n UI first, then import new one
-- **Option B**: Use n8n CLI: `n8n import:workflow --input=file.json --separate` (imports as new copy)
-- After import, **delete the old/duplicate** from n8n UI before activating
+Import dari UI n8n atau CLI. File yang digunakan:
 
-**⚠️ CLI Import Note**: `n8n import:workflow` always sets `active=false` regardless of JSON. You MUST activate manually after import.
+- `n8n-workflows/01-invoice-ingestion.json`
+- `n8n-workflows/02-approval-handler.json`
+- `n8n-workflows/03-reminder-escalation.json`
 
-### 7. Test End-to-End
-1. Upload test invoice (PDF/image) to `Invoices_Incoming` Drive folder
-2. Check n8n executions: `01-invoice-ingestion` should run
-3. Verify row added to Google Sheets (status: "Pending Approval")
-4. Check Telegram: Owner should receive notification with buttons
-5. Click **Approve** → Form opens → Submit
-6. Verify Sheets status → "Approved", Admin gets notification
+Setelah import:
 
----
+1. Bind credential Google Drive pada trigger dan download node.
+2. Bind credential Google Sheets pada node read/write.
+3. Bind credential Telegram pada node send.
+4. Periksa expression environment DeepSeek dan chat ID.
+5. Aktifkan workflow satu per satu.
+6. Pastikan tidak ada duplicate workflow dengan nama sama.
 
-## Directory Structure
+> Import CLI membuat workflow baru dan biasanya inactive. Jika re-import, nonaktifkan/hapus workflow lama setelah workflow baru diverifikasi agar satu file tidak memicu dua kali.
 
-```
-invoice-approval-automation/
-├── docker-compose.yml
-├── .env                    # Actual secrets (gitignored)
-├── .env.template           # Template
-├── credentials/
-│   └── sa-key.json         # Google Service Account (gitignored)
-├── n8n-workflows/
-│   ├── 01-invoice-ingestion.json
-│   ├── 02-approval-handler.json
-│   └── 03-reminder-escalation.json
-└── docs/
-    ├── SETUP.md
-    ├── OPERATIONS.md
-    └── USER_GUIDE.md
+Default source JSON menyimpan `active: false`; aktivasi adalah keputusan runtime, bukan bagian dari file export.
+
+## 6. Google Sheets Schema
+
+Gunakan tab invoice dengan header berikut:
+
+```text
+invoice_id, received_at, vendor, invoice_date, invoice_number, amount,
+status, confidence, drive_file_id, drive_file_link, source, approved_at,
+approved_by, rejected_at, reject_reason, reminder_count, last_reminder_at,
+created_at, updated_at
 ```
 
----
+Workflow menggunakan `GOOGLE_SHEETS_SPREADSHEET_ID` dari environment dan nama tab yang tersimpan di node Google Sheets. Periksa kembali nama tab saat binding credential.
 
-## Troubleshooting
+## 7. Smoke Test Aman
 
-| Issue | Solution |
-|-------|----------|
-| n8n won't start | Check `docker-compose logs n8n` - usually PostgreSQL not ready or port conflict |
-| Google API 403 | Verify Service Account has correct roles, Sheet/Drive shared with SA email |
-| Doc AI 404 | Check `PROCESSOR_ID`, `LOCATION`, `PROJECT_ID` match exactly |
-| Telegram webhook fails | Verify `WEBHOOK_URL` accessible from internet (use ngrok for dev) |
-| Sheets not updating | Check n8n Google credentials connected, workflow active |
-| HMAC verification fails | Ensure `WEBHOOK_HMAC_SECRET` matches in .env and n8n credentials |
+1. Upload satu JPG/JPEG/PNG invoice dummy ke folder Drive.
+2. Tunggu maksimal satu interval polling.
+3. Periksa execution `01-invoice-ingestion`.
+4. Periksa row di Sheets.
+5. Periksa Telegram owner.
+6. Untuk confidence rendah, pastikan row menjadi `Low Confidence` dan tidak ada notifikasi owner.
+7. Hindari mengulang file yang sama jika tidak ingin membuat row duplikat.
 
----
+Regression test lokal:
 
-## Webhook Registration Troubleshooting (n8n v1.60)
-
-### Problem: Webhook returns 404 after activation
-**Symptom**: Workflow shows "Active" but `POST /webhook/approve` returns 404.
-
-**Root Cause 1: Queue Mode**
-- n8n v1.60 queue mode (`N8N_MODE=queue`) may not register webhooks on main instance
-- Webhooks might be handled by worker (which doesn't listen on port 5678)
-
-**Fix**: Test in single mode first:
-```bash
-# Use single mode compose file
-docker-compose -f docker-compose.single.yml up -d
-# Import test-webhook-only.json
-# Activate via UI
-# Test: curl -X POST http://localhost:5679/webhook/test-webhook
+```powershell
+pytest -q
 ```
 
-**Root Cause 2: Missing Credentials**
-- Workflow nodes with missing credentials (Google Sheets, Telegram) can cause silent webhook registration failure
-- n8n may skip webhook registration if any credential is invalid
+## Troubleshooting Cepat
 
-**Fix**: Create stub credentials in n8n UI for all referenced services, OR ensure all credentials are properly configured before activation.
+| Masalah | Tindakan |
+|---|---|
+| n8n tidak sehat | `docker compose logs --tail=100 n8n` dan cek PostgreSQL/Redis |
+| OAuth gagal | Pastikan callback persis memakai port `5680` dan client Google mengizinkannya |
+| Drive tidak memicu | Cek folder ID, scope OAuth, dan ekstensi file |
+| DeepSeek gagal | Cek endpoint, model vision, API key, quota, dan ukuran image base64 |
+| Sheets tidak berubah | Cek credential, spreadsheet ID, nama tab, dan execution detail |
+| Telegram tidak terkirim | Cek token credential, chat ID, `/start`, dan log node Telegram |
+| Approval `401` | Cek HMAC secret, timestamp, dan canonical payload caller |
 
-**Root Cause 3: webhookId Missing**
-- n8n v1.60 requires `webhookId` parameter on Webhook node for production registration
-- Only UI activation generates webhookId automatically; CLI/import does not
-
-**Fix**: Add `webhookId` to workflow JSON (already done in 02-approval-handler.json) or activate via UI.
-
-**Verification**:
-```bash
-# Check webhook_entity table in PostgreSQL
-docker-compose exec postgres psql -U n8n -d n8n -c "SELECT * FROM webhook_entity;"
-# Should return rows if webhooks registered
-```
-
----
-
-## Production Checklist
-
-- [ ] Use HTTPS domain (reverse proxy: Nginx/Traefik + Let's Encrypt)
-- [ ] Set `N8N_PROTOCOL=https`, `WEBHOOK_URL=https://...`
-- [ ] Strong passwords in `.env`
-- [ ] Regular PostgreSQL backups (cron: `pg_dump`)
-- [ ] Monitor disk space (n8n executions, PostgreSQL, Redis)
-- [ ] Set up log aggregation (Loki, ELK, or simple file rotation)
-- [ ] Document AI: Monitor usage, set budget alerts in GCP
-- [ ] Telegram: Set webhook to production URL
-- [ ] Rotate `WEBHOOK_HMAC_SECRET` every 90 days
+Untuk operasi harian, lihat [OPERATIONS.md](OPERATIONS.md). Untuk perilaku bisnis, lihat [USER_GUIDE.md](USER_GUIDE.md).

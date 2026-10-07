@@ -1,166 +1,93 @@
-# User Guide - Invoice Approval Automation
+# Panduan Pengguna
 
-## Overview
-Sistem otomasi approval invoice yang menghilangkan proses manual ekstrak data, catat ke spreadsheet, dan chasing approval via WhatsApp. Flow: **Invoice masuk → OCR otomatis → Google Sheets → Notifikasi Telegram → Owner Approve/Reject → Status update → Admin notif bayar**.
+## Ringkasnya
 
----
+Jalur aktif menerima **gambar invoice JPG, JPEG, atau PNG** dari folder Google Drive yang dikonfigurasi. n8n mengirim gambar ke DeepSeek untuk OCR dan normalisasi, menyimpan hasil ke tab invoice di Google Sheets, lalu mengirim ringkasan plain text ke Telegram owner.
 
-## Untuk Owner (Pemilik Bisnis / Approver)
+Pesan invoice baru saat ini adalah **notifikasi**, bukan tombol approval. Link file dan tombol `Approve/Reject` sengaja tidak ditampilkan karena belum ada penghubung Telegram button/deep-link ke endpoint approval.
 
-### Menerima Notifikasi
-- Setiap invoice baru → notifikasi Telegram otomatis
-- Format pesan:
-  ```
-  📄 Invoice Baru Masuk
-  
-  🏢 Vendor: PT Sumber Makmur
-  📅 Tanggal: 2026-08-10
-  🔢 No. Invoice: INV-2026-00123
-  💰 Nominal: Rp 15.000.000
-  🎯 Confidence: 94%
-  
-  [ 📎 Lihat File ] (link Google Drive)
-  
-  [✅ Approve] [❌ Reject]
-  ```
+## Alur Invoice Baru
 
-### Approve Invoice
-1. Klik tombol **✅ Approve**
-2. Buka halaman form approval (browser)
-3. **Review data** (bisa edit kalau ada salah):
-   - Vendor, Tanggal, No. Invoice, Nominal
-4. Klik **Approve** → Submit
-5. Selesai! Status di Sheets jadi "Approved", Admin dapat notif siap bayar.
+1. Admin menaruh gambar invoice di folder Drive yang sudah dikonfigurasi.
+2. Trigger Drive memeriksa folder setiap lima menit.
+3. Sistem hanya melanjutkan JPG/JPEG/PNG; tipe file lain diabaikan.
+4. DeepSeek membaca teks gambar, kemudian menormalisasi `vendor`, `invoice_date`, `invoice_number`, `amount`, dan confidence.
+5. Jika confidence di bawah `0.85`, row ditulis sebagai `Low Confidence` dan tidak ada notifikasi owner.
+6. Jika confidence cukup, sistem membaca Sheets untuk dedupe.
+7. Invoice baru ditulis sebagai `Pending Approval` dan owner menerima pesan Telegram.
+8. Invoice yang cocok dengan composite key ditulis sebagai `Duplicate` dan tidak dikirim sebagai invoice baru.
 
-### Reject Invoice
-1. Klik tombol **❌ Reject**
-2. Buka halaman form
-3. **Wajib isi alasan reject** (contoh: "Nominal tidak sesuai PO", "Invoice double")
-4. Klik **Reject** → Submit
-5. Admin dapat notifikasi penolakan + alasan.
+Contoh pesan:
 
-### Reminder Otomatis
-- Jika belum approve dalam **1 jam** → reminder ke-1
-- **4 jam** → reminder ke-2
-- **12 jam** → reminder ke-3
-- **> 24 jam** → escalation ke Admin (Owner tidak perlu action)
+```text
+INVOICE BARU MASUK
 
----
+Vendor: PT Mitra Agung
+Tanggal: 2025-01-01
+No. Invoice: LKP-02-03012025
+Nominal: Rp 2.500.000
+Confidence: 94%
+Status: Pending Approval
+```
 
-## Untuk Admin Keuangan (VA / Accounts Payable)
+## Untuk Owner
 
-### Tugas Harian
-1. **Cek Google Sheets** tab "Invoices" 
-2. Filter kolom **Status = "Approved"**
-3. Invoice yang approved → **eksekusi pembayaran** ke supplier
-4. (Opsional) Update kolom manual: `Payment Date`, `Payment Ref` jika ada kolom tambahan
+- Gunakan Telegram untuk melihat ringkasan invoice baru.
+- Verifikasi keputusan terhadap file asli di Google Drive atau row Google Sheets.
+- Karena tombol approval belum terhubung pada pesan, approval dilakukan melalui caller/integrasi yang dapat memanggil endpoint signed `POST /webhook/approve`.
+- Setelah request valid, workflow membuka form n8n. Pilih `Approve` atau `Reject`.
+- Saat memilih `Reject`, alasan wajib diisi.
 
-### Handling Kasus Khusus
+### Apa yang Terjadi Setelah Approval
 
-| Status di Sheets | Artinya | Action Admin |
-|------------------|---------|--------------|
-| **Pending Approval** | Menunggu Owner approve | Tunggu, jangan bayar |
-| **Approved** | Owner sudah setuju | **Lakukan pembayaran** |
-| **Rejected** | Owner tolak + ada alasan | Baca `Reject Reason`, koordinasi dengan vendor/ Owner |
-| **Duplicate** | Invoice duplikat terdeteksi | **Jangan bayar**, cek row aslinya |
-| **Low Confidence** | OCR kurang yakin (confidence < 85%) | **Cek manual** file di Drive, edit data di Sheets, ubah status jadi "Pending Approval" |
-| **Failed** | Error proses otomatis | Cek log n8n / hubungi tech support |
+- `Approved`: Sheets diperbarui dengan status, waktu, dan actor; admin menerima notifikasi hasil.
+- `Rejected`: Sheets diperbarui dengan status, waktu, dan alasan; admin menerima notifikasi hasil.
+- Jika status bukan `Pending Approval`, handler tidak memproses ulang invoice tersebut.
 
-### Edit Data Manual (Jika OCR Salah)
-1. Buka Google Sheets
-2. Cari row invoice (filter by Vendor/No. Invoice)
-3. Edit kolom: `Vendor`, `Tanggal`, `No. Invoice`, `Nominal`
-4. Ubah `Status` → `Pending Approval` (kalau sudah Approved/Rejected, jangan diubah)
-5. Sistem akan kirim notifikasi baru ke Owner
+## Untuk Admin Keuangan
 
-### Forward Invoice dari WhatsApp ke Drive
-Supplier kirim foto/PDF via WhatsApp:
-1. Buka WhatsApp Web / HP
-2. Forward file ke **Google Drive folder "Invoices_Incoming"**
-   - Cara cepat: Share → Google Drive → pilih folder `Invoices_Incoming`
-3. Sistem otomatis detect & proses dalam 5 menit
+### Status di Google Sheets
 
----
+| Status | Arti | Tindakan |
+|---|---|---|
+| `Pending Approval` | Menunggu keputusan | Jangan bayar sebelum disetujui |
+| `Approved` | Owner menyetujui | Lanjutkan proses pembayaran sesuai SOP bisnis |
+| `Rejected` | Invoice ditolak | Baca alasan dan lakukan koreksi/koordinasi |
+| `Duplicate` | Composite key cocok dengan row sebelumnya | Jangan membuat pembayaran kedua |
+| `Low Confidence` | Hasil AI di bawah threshold | Periksa file asli dan koreksi data secara manual |
+| `Failed` | Eksekusi mengalami error | Periksa execution n8n dan konfigurasi credential |
 
-## Google Sheets Structure (Tab "Invoices")
+### Koreksi Low Confidence
 
-| Kolom | Deskripsi | Contoh |
-|-------|-----------|--------|
-| `invoice_id` | ID unik sistem (UUID) | `a1b2-c3d4...` |
-| `received_at` | Waktu file terdeteksi | `2026-08-12 14:30:00` |
-| `vendor` | Nama vendor (dari OCR/edit manual) | `PT Sumber Makmur` |
-| `invoice_date` | Tanggal invoice (YYYY-MM-DD) | `2026-08-10` |
-| `invoice_number` | Nomor invoice | `INV-2026-00123` |
-| `amount` | Nominal (angka, tanpa Rp) | `15000000` |
-| `status` | **Pending Approval / Approved / Rejected / Duplicate / Low Confidence / Failed** | `Pending Approval` |
-| `confidence` | Skor kepercayaan OCR (0-1) | `0.94` |
-| `drive_file_id` | ID file Google Drive | `1AbC...` |
-| `drive_file_link` | Link buka file | `https://drive.google.com/file/d/...` |
-| `source` | Sumber: `Gmail` atau `Drive` | `Gmail` |
-| `approved_at` | Waktu approve (kosong kalau belum) | `2026-08-12 14:45:00` |
-| `approved_by` | ID Owner yang approve | `owner_telegram_id` |
-| `rejected_at` | Waktu reject | - |
-| `reject_reason` | Alasan reject (dari Owner) | `Nominal tidak sesuai PO` |
-| `reminder_count` | Jumlah reminder terkirim | `0` |
-| `last_reminder_at` | Waktu reminder terakhir | - |
-| `created_at` | Row dibuat | `2026-08-12 14:30:00` |
-| `updated_at` | Terakhir diubah | `2026-08-12 14:45:00` |
+1. Buka file asli di Drive.
+2. Bandingkan dengan row `Low Confidence` di Sheets.
+3. Koreksi field invoice sesuai dokumen sumber.
+4. Ikuti SOP internal untuk mengubah status menjadi `Pending Approval` bila invoice memang layak diproses.
+5. Jangan menghapus row lama jika audit trail masih diperlukan.
 
----
+## Kolom Utama Sheets
 
-## Troubleshooting Umum
+`invoice_id`, `received_at`, `vendor`, `invoice_date`, `invoice_number`, `amount`, `status`, `confidence`, `drive_file_id`, `drive_file_link`, `source`, `approved_at`, `approved_by`, `rejected_at`, `reject_reason`, `reminder_count`, `last_reminder_at`, `created_at`, `updated_at`.
 
-| Masalah | Penyebab | Solusi |
-|---------|----------|--------|
-| **Invoice tidak muncul di Sheets** | File bukan PDF/JPG/PNG, atau folder Drive salah | Pastikan file di folder `Invoices_Incoming`, format PDF/JPG/PNG |
-| **Data OCR salah (vendor/nominal)** | Foto blur, format invoice tidak standar | Edit manual di Sheets → ubah status ke "Pending Approval" |
-| **Tidak dapat notifikasi Telegram** | Bot diblokir / chat ID salah | Cek bot aktif, chat ID benar, coba `/start` ke bot |
-| **Klik Approve tapi error** | Webhook tidak accessible / HMAC mismatch | Hubungi tech support (cek n8n logs) |
-| **Duplicate tidak terdeteksi** | Bedanya spasi/kapital/format tanggal | Sistem sudah handle case/whitespace, cek composite key |
-| **Reminder tidak datang** | Workflow reminder tidak jalan | Cek n8n execution `03-reminder-escalation` |
+## Batasan yang Perlu Diketahui
 
----
+- Tidak ada trigger Gmail atau WhatsApp API pada jalur aktif.
+- PDF dan WEBP tidak lolos filter file aktif.
+- DeepSeek API diperlukan untuk OCR dan normalisasi.
+- Foto buram, miring, terpotong, atau berkontras rendah dapat menghasilkan field kosong atau `Low Confidence`.
+- Reminder/escalation tersedia sebagai workflow terpisah, tetapi runtime lokal terakhir tidak mengaktifkannya.
+- Pesan Telegram hanya berisi ringkasan dan tidak mengirim file invoice.
 
-## Tips Efisiensi
+## Troubleshooting
 
-### Untuk Owner
-- **Bookmark** chat bot Telegram untuk akses cepat
-- Gunakan **Telegram Desktop** untuk approve dari laptop
-- Jika sering approve: Buka form di tab baru, approve batch
+| Gejala | Pemeriksaan |
+|---|---|
+| File tidak diproses | Pastikan file berada di folder Drive yang benar dan ekstensi JPG/JPEG/PNG |
+| Row masuk `Low Confidence` | Periksa kualitas gambar, field hasil OCR, dan log execution |
+| Data vendor/nominal salah | Bandingkan dengan file asli; koreksi row secara manual sesuai SOP |
+| Telegram tidak menerima pesan | Pastikan bot tidak diblokir, chat ID benar, dan credential Telegram masih valid |
+| DeepSeek gagal | Cek URL endpoint, model, API key, quota, dan ukuran payload gambar |
+| Approval ditolak `401` | Cek `WEBHOOK_HMAC_SECRET`, `x-signature`, `x-timestamp`, dan canonical JSON payload |
+| Approval tidak diproses | Pastikan invoice masih `Pending Approval` dan invoice ID ditemukan di Sheets |
 
-### Untuk Admin
-- **Filter view** di Sheets: Buat filter view "Pending Approval" & "Approved"
-- **Conditional formatting**: Warnai row by status (Hijau=Approved, Merah=Rejected, Kuning=Pending)
-- **Notifikasi email** (opsional): Setup n8n kirim email ke Admin saat status=Approved
-
----
-
-## Keamanan & Privasi
-
-- **Data invoice** hanya di Google Sheets (akses terbatas Owner/Admin)
-- **Telegram** hanya kirim ringkasan (vendor, nominal, no invoice) — **bukan file lengkap**
-- **File asli** di Google Drive — akses dibatasi Service Account + Owner/Admin
-- **Webhook approval** dilindungi HMAC signature — tidak bisa dipalsukan
-- **Audit trail** lengkap di Sheets (siapa approve, kapan, alasan reject)
-
----
-
-## Kontak Bantuan
-
-| Masalah | Kontak |
-|---------|--------|
-| Teknis (n8n, OCR, Docker) | Tech Support / Developer |
-| Akses Google Sheets/Drive | Admin IT / Owner |
-| Telegram bot error | Tech Support |
-| Data invoice salah | Admin Keuangan (edit manual) |
-
----
-
-## Versi & Update
-- **Versi**: 1.0 (MVP)
-- **Terakhir update**: 2026-08-12
-- **Changelog**: Lihat `docs/CHANGELOG.md` (jika ada)
-
----
-
-> **Catatan**: Sistem ini dirancang untuk **Google Workspace only** (Gmail, Drive, Sheets, Document AI). Tidak butuh ERP mahal, server sendiri, atau software berbayar selain biaya minimal GCP (Document AI ~$0.27/bln setelah free tier).
+Untuk setup dan operasi teknis, lihat [SETUP.md](SETUP.md) dan [OPERATIONS.md](OPERATIONS.md).
